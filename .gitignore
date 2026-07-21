@@ -1,0 +1,12 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# PowerShell / Pester run artifacts
+*.log
+TestResults.xml
+testResults.xml
