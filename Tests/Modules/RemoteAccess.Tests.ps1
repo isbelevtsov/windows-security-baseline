@@ -40,6 +40,21 @@ Describe 'Set-RemoteAccessBaseline' {
         Should -Invoke -ModuleName RemoteAccess -CommandName Set-Smb1Enabled -Times 0
         Should -Invoke -ModuleName RemoteAccess -CommandName Set-GuestAccountEnabled -Times 0
     }
+
+    It 'correctly inverts polarity when writing SMBv1 and Guest account state' {
+        Mock -ModuleName RemoteAccess -CommandName Get-RdpDenyValue { $true }
+        Mock -ModuleName RemoteAccess -CommandName Get-Smb1Enabled { $true }
+        Mock -ModuleName RemoteAccess -CommandName Get-GuestAccountEnabled { $true }
+        Mock -ModuleName RemoteAccess -CommandName Set-RdpDenyValue { }
+        Mock -ModuleName RemoteAccess -CommandName Set-Smb1Enabled { }
+        Mock -ModuleName RemoteAccess -CommandName Set-GuestAccountEnabled { }
+
+        Set-RemoteAccessBaseline -Config (New-TestConfig) | Out-Null
+
+        Should -Invoke -ModuleName RemoteAccess -CommandName Set-Smb1Enabled -Times 1 -ParameterFilter { $Enabled -eq $false }
+        Should -Invoke -ModuleName RemoteAccess -CommandName Set-GuestAccountEnabled -Times 1 -ParameterFilter { $Enabled -eq $false }
+        Should -Invoke -ModuleName RemoteAccess -CommandName Set-RdpDenyValue -Times 0
+    }
 }
 
 Describe 'Backup-RemoteAccessSettings / Restore-RemoteAccessSettings' {
