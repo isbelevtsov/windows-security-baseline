@@ -2587,6 +2587,21 @@ Describe 'Set-RemoteAccessBaseline' {
         Should -Invoke -ModuleName RemoteAccess -CommandName Set-Smb1Enabled -Times 0
         Should -Invoke -ModuleName RemoteAccess -CommandName Set-GuestAccountEnabled -Times 0
     }
+
+    It 'correctly inverts polarity when writing SMBv1 and Guest account state' {
+        Mock -ModuleName RemoteAccess -CommandName Get-RdpDenyValue { $true }
+        Mock -ModuleName RemoteAccess -CommandName Get-Smb1Enabled { $true }
+        Mock -ModuleName RemoteAccess -CommandName Get-GuestAccountEnabled { $true }
+        Mock -ModuleName RemoteAccess -CommandName Set-RdpDenyValue { }
+        Mock -ModuleName RemoteAccess -CommandName Set-Smb1Enabled { }
+        Mock -ModuleName RemoteAccess -CommandName Set-GuestAccountEnabled { }
+
+        Set-RemoteAccessBaseline -Config (New-TestConfig) | Out-Null
+
+        Should -Invoke -ModuleName RemoteAccess -CommandName Set-Smb1Enabled -Times 1 -ParameterFilter { $Enabled -eq $false }
+        Should -Invoke -ModuleName RemoteAccess -CommandName Set-GuestAccountEnabled -Times 1 -ParameterFilter { $Enabled -eq $false }
+        Should -Invoke -ModuleName RemoteAccess -CommandName Set-RdpDenyValue -Times 0
+    }
 }
 
 Describe 'Backup-RemoteAccessSettings / Restore-RemoteAccessSettings' {
@@ -2768,7 +2783,7 @@ Export-ModuleMember -Function Test-RemoteAccessBaseline, Backup-RemoteAccessSett
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pwsh -NoProfile -Command "Invoke-Pester -Path Tests/Modules/RemoteAccess.Tests.ps1 -Output Detailed"`
-Expected: PASS — 4 tests, 0 failed.
+Expected: PASS — 5 tests, 0 failed. (Includes a regression test added per a task-review fix: `Set-RemoteAccessBaseline` previously had no test exercising the write-side polarity inversion for SMBv1/Guest when they are actually non-compliant.)
 
 - [ ] **Step 5: Commit**
 
@@ -2795,6 +2810,11 @@ git commit -m "Add RemoteAccess module (RDP, SMBv1, Guest account)"
 # Tests/Modules/BitLocker.Tests.ps1
 BeforeAll {
     Import-Module "$PSScriptRoot/../../Modules/BitLocker.psm1" -Force
+
+    # $env:SystemDrive is a Windows-only environment variable; Set-BitLockerBaseline
+    # references it directly (not inside a mockable wrapper), so it must be set here
+    # for the test to run on non-Windows dev hardware.
+    $env:SystemDrive = 'C:'
 
     function New-TestConfig {
         @{
@@ -3096,7 +3116,7 @@ BeforeAll {
     function global:Test-BitLockerBaseline { @() }
     function global:Backup-BitLockerSettings { }
     function global:Set-BitLockerBaseline { @() }
-    function global:Restore-BitLockerSettings { }
+    function global:Restore-BitLockerSettings { param([string]$BackupPath, [switch]$DecryptOnRestore) }
 }
 
 Describe 'Invoke-BaselineRun elevation check' {
@@ -3201,10 +3221,11 @@ Describe 'Invoke-BaselineRun -Mode Restore' {
         New-Item -Path (Join-Path $TestDrive 'Backups/2026-07-21_150000/Defender') -ItemType Directory -Force | Out-Null
         Set-Content -Path (Join-Path $TestDrive 'Backups/2026-07-21_150000/manifest.json') -Value (@{ Timestamp = '2026-07-21_150000'; Mode = 'Apply'; Modules = @('Defender'); OSBuild = '22631' } | ConvertTo-Json)
 
-        Mock -ModuleName Orchestrator -CommandName Restore-DefenderSettings { }
+        Mock -ModuleName Orchestrator -CommandName Restore-DefenderSettings { "some stray CLI output that should be suppressed" }
 
         $results = Invoke-BaselineRun -Mode 'Restore' -Modules @('Defender') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_160000' -SnapshotTimestamp '2026-07-21_150000'
 
+        $results.Count | Should -Be 1
         $results[0].Restored | Should -BeTrue
         Should -Invoke -ModuleName Orchestrator -CommandName Restore-DefenderSettings -Times 1
     }
@@ -3328,10 +3349,14 @@ function Invoke-ApplyRun {
         }
     }
 
-    Write-BaselineManifest -RootPath $RootPath -Timestamp $RunTimestamp -Mode 'Apply' -Modules @($appliedModules) -OSBuild $osInfo.Build | Out-Null
+    if (@($appliedModules).Count -gt 0) {
+        Write-BaselineManifest -RootPath $RootPath -Timestamp $RunTimestamp -Mode 'Apply' -Modules @($appliedModules) -OSBuild $osInfo.Build | Out-Null
+    }
 
     $backupRoot = Join-Path -Path $RootPath -ChildPath (Join-Path 'Backups' $RunTimestamp)
-    Write-BaselineApplySummary -ChangeRecords @($allChanges) -BackupPath $backupRoot -LogPath $LogPath
+    if (@($allChanges).Count -gt 0) {
+        Write-BaselineApplySummary -ChangeRecords @($allChanges) -BackupPath $backupRoot -LogPath $LogPath
+    }
 
     return @($allChanges)
 }
@@ -3364,7 +3389,7 @@ function Invoke-RestoreRun {
                 & $restoreFunction -BackupPath $backupPath -DecryptOnRestore:$DecryptOnRestore
             }
             else {
-                & $restoreFunction -BackupPath $backupPath
+                & $restoreFunction -BackupPath $backupPath | Out-Null
                 Write-BaselineLog -Message "Restored module '$moduleName' from '$backupPath'." -LogPath $LogPath
                 [PSCustomObject]@{ Module = $moduleName; Restored = $true }
             }
