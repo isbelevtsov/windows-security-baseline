@@ -56,4 +56,9 @@ Describe 'Get-BaselineDescription' {
         $section = @{ Foo = @{ Value = 42; Description = 'the answer' } }
         Get-BaselineDescription -Section $section -Name 'Foo' | Should -Be 'the answer'
     }
+
+    It 'throws for an unknown key' {
+        $section = @{ Foo = @{ Value = 42; Description = 'the answer' } }
+        { Get-BaselineDescription -Section $section -Name 'Bar' } | Should -Throw
+    }
 }

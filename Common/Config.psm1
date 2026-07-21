@@ -44,7 +44,7 @@ function Get-BaselineDescription {
     )
 
     if (-not $Section.ContainsKey($Name)) {
-        return ''
+        throw "Config section is missing expected key '$Name'."
     }
     return $Section[$Name].Description
 }
