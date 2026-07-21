@@ -77,6 +77,8 @@ function Invoke-ApplyRun {
             & $script:ModuleFunctionMap[$moduleName].Backup -BackupPath $backupPath | Out-Null
 
             $setFunction = $script:ModuleFunctionMap[$moduleName].Set
+            $testFunction = $script:ModuleFunctionMap[$moduleName].Test
+            $workingCfg = $null
             $changes = if ($moduleName -in $script:SeceditModules) {
                 $workingCfg = Join-Path -Path $RootPath -ChildPath (Join-Path 'Logs' "$RunTimestamp-$moduleName-working.cfg")
                 & $setFunction -Config $config[$moduleName] -WorkingCfgPath $workingCfg
@@ -88,7 +90,26 @@ function Invoke-ApplyRun {
             $appliedModules += $moduleName
             foreach ($change in $changes) {
                 Write-BaselineLog -Message "[$moduleName] $($change.Setting): $($change.Before) -> $($change.After) (Changed=$($change.Changed))" -LogPath $LogPath
+                if ($change.Note) {
+                    Write-BaselineLog -Message "[$moduleName] $($change.Note)" -Level 'Warn' -LogPath $LogPath
+                }
             }
+
+            # Post-apply verification: re-run Test-<Area>Baseline as the primary correctness
+            # signal for Apply, and surface any setting that is still non-compliant.
+            $verifyResults = if ($moduleName -in $script:SeceditModules) {
+                & $testFunction -Config $config[$moduleName] -WorkingCfgPath $workingCfg
+            }
+            else {
+                & $testFunction -Config $config[$moduleName]
+            }
+
+            foreach ($verifyResult in $verifyResults) {
+                if (-not $verifyResult.Pass) {
+                    Write-BaselineLog -Message "[$moduleName] Post-apply verification failed: setting '$($verifyResult.Setting)' is still non-compliant (Expected=$($verifyResult.Expected), Actual=$($verifyResult.Actual))." -Level 'Warn' -LogPath $LogPath
+                }
+            }
+
             $changes
         }
         catch {

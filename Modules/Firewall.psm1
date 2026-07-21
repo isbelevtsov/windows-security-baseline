@@ -19,6 +19,9 @@ function Invoke-NetshBinary {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string[]]$Arguments)
     & netsh.exe @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "netsh.exe failed with exit code $LASTEXITCODE (arguments: $($Arguments -join ' '))"
+    }
 }
 
 function Test-FirewallBaseline {

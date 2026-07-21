@@ -136,6 +136,53 @@ Describe 'Invoke-BaselineRun -Mode Apply' {
         $manifest.Modules | Should -Contain 'Firewall'
         $manifest.Modules | Should -Not -Contain 'Defender'
     }
+
+    It 'logs a Warn when post-apply verification finds a setting still non-compliant' {
+        Mock -ModuleName Orchestrator -CommandName Backup-DefenderSettings { }
+        Mock -ModuleName Orchestrator -CommandName Set-DefenderBaseline { @([PSCustomObject]@{ Module = 'Defender'; Setting = 'X'; Before = $false; After = $true; Changed = $true }) }
+        Mock -ModuleName Orchestrator -CommandName Test-DefenderBaseline { @([PSCustomObject]@{ Module = 'Defender'; Setting = 'X'; Expected = $true; Actual = $false; Pass = $false }) }
+        Mock -ModuleName Orchestrator -CommandName Write-BaselineLog { }
+
+        Invoke-BaselineRun -Mode 'Apply' -Modules @('Defender') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_170000' | Out-Null
+
+        Should -Invoke -ModuleName Orchestrator -CommandName Write-BaselineLog -ParameterFilter {
+            $Level -eq 'Warn' -and $Message -match 'verification failed' -and $Message -match 'still'
+        }
+    }
+
+    It 'does not log a verification Warn when the re-check passes' {
+        Mock -ModuleName Orchestrator -CommandName Backup-DefenderSettings { }
+        Mock -ModuleName Orchestrator -CommandName Set-DefenderBaseline { @([PSCustomObject]@{ Module = 'Defender'; Setting = 'X'; Before = $false; After = $true; Changed = $true }) }
+        Mock -ModuleName Orchestrator -CommandName Test-DefenderBaseline { @([PSCustomObject]@{ Module = 'Defender'; Setting = 'X'; Expected = $true; Actual = $true; Pass = $true }) }
+        Mock -ModuleName Orchestrator -CommandName Write-BaselineLog { }
+
+        Invoke-BaselineRun -Mode 'Apply' -Modules @('Defender') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_170500' | Out-Null
+
+        Should -Invoke -ModuleName Orchestrator -CommandName Write-BaselineLog -Times 0 -ParameterFilter {
+            $Level -eq 'Warn' -and $Message -match 'verification failed'
+        }
+    }
+
+    It 'logs a Warn for a change record Note (e.g. a plaintext recovery key warning)' {
+        Mock -ModuleName Orchestrator -CommandName Backup-BitLockerSettings { }
+        Mock -ModuleName Orchestrator -CommandName Set-BitLockerBaseline {
+            @([PSCustomObject]@{
+                Module  = 'BitLocker'
+                Setting = 'OSDriveEncrypted'
+                Before  = $false
+                After   = $true
+                Changed = $true
+                Note    = "Recovery key written in plaintext to 'C:\ProgramData\SecurityBaseline\RecoveryKeys\C-recovery-key.txt' - secure or relocate it."
+            })
+        }
+        Mock -ModuleName Orchestrator -CommandName Write-BaselineLog { }
+
+        Invoke-BaselineRun -Mode 'Apply' -Modules @('BitLocker') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_180000' | Out-Null
+
+        Should -Invoke -ModuleName Orchestrator -CommandName Write-BaselineLog -ParameterFilter {
+            $Level -eq 'Warn' -and $Message -match 'plaintext'
+        }
+    }
 }
 
 Describe 'Invoke-BaselineRun -Mode Restore' {

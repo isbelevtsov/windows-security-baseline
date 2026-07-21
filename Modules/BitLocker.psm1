@@ -78,6 +78,7 @@ function Set-BitLockerBaseline {
     $keyFolder = Get-BaselineValue -Section $Config -Name 'RecoveryKeyPath'
 
     $changed = $false
+    $note = $null
 
     if (-not $before.Pass) {
         Enable-OsDriveBitLocker -EncryptionMethod $method
@@ -90,6 +91,7 @@ function Set-BitLockerBaseline {
             $safeName = $env:SystemDrive.Replace(':', '')
             $keyFile = Join-Path -Path $keyFolder -ChildPath "$safeName-recovery-key.txt"
             Set-Content -Path $keyFile -Value $recoveryKey
+            $note = "Recovery key written in plaintext to '$keyFile' - secure or relocate it."
         }
         $changed = $true
     }
@@ -101,6 +103,7 @@ function Set-BitLockerBaseline {
             Before  = $before.Actual
             After   = $(if ($changed) { $true } else { $before.Actual })
             Changed = $changed
+            Note    = $note
         }
     )
 }

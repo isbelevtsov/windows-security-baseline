@@ -46,6 +46,18 @@ Describe 'Set-BitLockerBaseline' {
         Get-Content -Path $keyFiles[0].FullName | Should -Be 'AAAA-1111-BBBB-2222'
     }
 
+    It 'includes a Note warning about the plaintext recovery key when a key is written' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
+
+        $changes = Set-BitLockerBaseline -Config (New-TestConfig)
+
+        $changes[0].Note | Should -Not -BeNullOrEmpty
+        $changes[0].Note | Should -Match 'plaintext'
+        $changes[0].Note | Should -Match ([regex]::Escape((Join-Path $TestDrive 'RecoveryKeys')))
+    }
+
     It 'does nothing when already protected' {
         Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'On' } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { }
@@ -54,6 +66,7 @@ Describe 'Set-BitLockerBaseline' {
 
         $changes[0].Changed | Should -BeFalse
         Should -Invoke -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker -Times 0
+        $changes[0].Note | Should -BeNullOrEmpty
     }
 }
 

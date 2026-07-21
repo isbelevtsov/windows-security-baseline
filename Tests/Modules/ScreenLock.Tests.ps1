@@ -64,4 +64,63 @@ Describe 'Backup-ScreenLockSettings / Restore-ScreenLockSettings' {
     It 'throws when restoring without a prior backup' {
         { Restore-ScreenLockSettings -BackupPath (Join-Path $TestDrive 'missing') } | Should -Throw
     }
+
+    It 'records ValueExisted = $false in the state file when no value is currently set' {
+        Mock -ModuleName ScreenLock -CommandName Export-InactivityTimeoutRegistry { }
+        Mock -ModuleName ScreenLock -CommandName Get-InactivityTimeoutValue { $null }
+        $backupPath = Join-Path $TestDrive 'ScreenLockStateAbsent'
+
+        Backup-ScreenLockSettings -BackupPath $backupPath | Out-Null
+
+        $state = Get-Content -Path (Join-Path $backupPath 'screenlock-state.json') -Raw | ConvertFrom-Json
+        $state.ValueExisted | Should -BeFalse
+    }
+
+    It 'records ValueExisted = $true in the state file when a value is currently set' {
+        Mock -ModuleName ScreenLock -CommandName Export-InactivityTimeoutRegistry { }
+        Mock -ModuleName ScreenLock -CommandName Get-InactivityTimeoutValue { 900 }
+        $backupPath = Join-Path $TestDrive 'ScreenLockStatePresent'
+
+        Backup-ScreenLockSettings -BackupPath $backupPath | Out-Null
+
+        $state = Get-Content -Path (Join-Path $backupPath 'screenlock-state.json') -Raw | ConvertFrom-Json
+        $state.ValueExisted | Should -BeTrue
+    }
+
+    It 'removes the value on restore when the backup shows it did not originally exist' {
+        Mock -ModuleName ScreenLock -CommandName Import-InactivityTimeoutRegistry { }
+        Mock -ModuleName ScreenLock -CommandName Remove-InactivityTimeoutValue { }
+        $backupPath = Join-Path $TestDrive 'RestoreScreenLockAbsent'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $backupPath 'screenlock.reg') -Value 'placeholder'
+        Set-Content -Path (Join-Path $backupPath 'screenlock-state.json') -Value (@{ ValueExisted = $false } | ConvertTo-Json)
+
+        Restore-ScreenLockSettings -BackupPath $backupPath
+
+        Should -Invoke -ModuleName ScreenLock -CommandName Remove-InactivityTimeoutValue -Times 1
+    }
+
+    It 'does not remove the value on restore when the backup shows it did originally exist' {
+        Mock -ModuleName ScreenLock -CommandName Import-InactivityTimeoutRegistry { }
+        Mock -ModuleName ScreenLock -CommandName Remove-InactivityTimeoutValue { }
+        $backupPath = Join-Path $TestDrive 'RestoreScreenLockPresent'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $backupPath 'screenlock.reg') -Value 'placeholder'
+        Set-Content -Path (Join-Path $backupPath 'screenlock-state.json') -Value (@{ ValueExisted = $true } | ConvertTo-Json)
+
+        Restore-ScreenLockSettings -BackupPath $backupPath
+
+        Should -Invoke -ModuleName ScreenLock -CommandName Remove-InactivityTimeoutValue -Times 0
+    }
+
+    It 'skips gracefully when restoring a backup made before the state file existed' {
+        Mock -ModuleName ScreenLock -CommandName Import-InactivityTimeoutRegistry { }
+        Mock -ModuleName ScreenLock -CommandName Remove-InactivityTimeoutValue { }
+        $backupPath = Join-Path $TestDrive 'RestoreScreenLockNoState'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $backupPath 'screenlock.reg') -Value 'placeholder'
+
+        { Restore-ScreenLockSettings -BackupPath $backupPath } | Should -Not -Throw
+        Should -Invoke -ModuleName ScreenLock -CommandName Remove-InactivityTimeoutValue -Times 0
+    }
 }

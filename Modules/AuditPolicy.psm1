@@ -4,6 +4,9 @@ function Invoke-AuditPolBinary {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string[]]$Arguments)
     & auditpol.exe @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "auditpol.exe failed with exit code $LASTEXITCODE (arguments: $($Arguments -join ' '))"
+    }
 }
 
 function ConvertTo-AuditPolFlags {

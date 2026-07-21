@@ -2,6 +2,9 @@ function Invoke-SecEditBinary {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string[]]$Arguments)
     & secedit.exe @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "secedit.exe failed with exit code $LASTEXITCODE (arguments: $($Arguments -join ' '))"
+    }
 }
 
 function Invoke-SecEditExport {

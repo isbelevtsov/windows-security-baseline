@@ -49,12 +49,18 @@ function Export-RemoteAccessRegistry {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$RegPath)
     & reg.exe export 'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server' $RegPath /y
+    if ($LASTEXITCODE -ne 0) {
+        throw "reg.exe failed with exit code $LASTEXITCODE (arguments: export 'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server' $RegPath /y)"
+    }
 }
 
 function Import-RemoteAccessRegistry {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$RegPath)
     & reg.exe import $RegPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "reg.exe failed with exit code $LASTEXITCODE (arguments: import $RegPath)"
+    }
 }
 
 function Test-RemoteAccessBaseline {
