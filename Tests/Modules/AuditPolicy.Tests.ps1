@@ -47,6 +47,98 @@ Describe 'Set-AuditPolicyBaseline' {
     }
 }
 
+Describe 'ConvertTo-AuditPolFlags' {
+    It 'converts Success to enable/disable' {
+        InModuleScope -ModuleName AuditPolicy {
+            $result = ConvertTo-AuditPolFlags -Outcome 'Success'
+            $result.Success | Should -Be 'enable'
+            $result.Failure | Should -Be 'disable'
+        }
+    }
+
+    It 'converts Failure to disable/enable' {
+        InModuleScope -ModuleName AuditPolicy {
+            $result = ConvertTo-AuditPolFlags -Outcome 'Failure'
+            $result.Success | Should -Be 'disable'
+            $result.Failure | Should -Be 'enable'
+        }
+    }
+
+    It 'converts SuccessAndFailure to enable/enable' {
+        InModuleScope -ModuleName AuditPolicy {
+            $result = ConvertTo-AuditPolFlags -Outcome 'SuccessAndFailure'
+            $result.Success | Should -Be 'enable'
+            $result.Failure | Should -Be 'enable'
+        }
+    }
+
+    It 'converts NoAuditing to disable/disable' {
+        InModuleScope -ModuleName AuditPolicy {
+            $result = ConvertTo-AuditPolFlags -Outcome 'NoAuditing'
+            $result.Success | Should -Be 'disable'
+            $result.Failure | Should -Be 'disable'
+        }
+    }
+}
+
+Describe 'Get-AuditSubcategorySetting' {
+    It 'parses "Success and Failure" to SuccessAndFailure' {
+        InModuleScope -ModuleName AuditPolicy {
+            Mock -CommandName Invoke-AuditPolBinary {
+                @(
+                    'Machine Name,Policy Target,Subcategory,Subcategory GUID,Inclusion Setting,Exclusion Setting'
+                    'HOST,System,Logon,{guid},Success and Failure,'
+                )
+            }
+
+            $result = Get-AuditSubcategorySetting -Subcategory 'Logon'
+            $result | Should -Be 'SuccessAndFailure'
+        }
+    }
+
+    It 'parses "Success" to Success' {
+        InModuleScope -ModuleName AuditPolicy {
+            Mock -CommandName Invoke-AuditPolBinary {
+                @(
+                    'Machine Name,Policy Target,Subcategory,Subcategory GUID,Inclusion Setting,Exclusion Setting'
+                    'HOST,System,Logon,{guid},Success,'
+                )
+            }
+
+            $result = Get-AuditSubcategorySetting -Subcategory 'Logon'
+            $result | Should -Be 'Success'
+        }
+    }
+
+    It 'parses "Failure" to Failure' {
+        InModuleScope -ModuleName AuditPolicy {
+            Mock -CommandName Invoke-AuditPolBinary {
+                @(
+                    'Machine Name,Policy Target,Subcategory,Subcategory GUID,Inclusion Setting,Exclusion Setting'
+                    'HOST,System,Logon,{guid},Failure,'
+                )
+            }
+
+            $result = Get-AuditSubcategorySetting -Subcategory 'Logon'
+            $result | Should -Be 'Failure'
+        }
+    }
+
+    It 'defaults unrecognized setting to NoAuditing' {
+        InModuleScope -ModuleName AuditPolicy {
+            Mock -CommandName Invoke-AuditPolBinary {
+                @(
+                    'Machine Name,Policy Target,Subcategory,Subcategory GUID,Inclusion Setting,Exclusion Setting'
+                    'HOST,System,Logon,{guid},UnknownSetting,'
+                )
+            }
+
+            $result = Get-AuditSubcategorySetting -Subcategory 'Logon'
+            $result | Should -Be 'NoAuditing'
+        }
+    }
+}
+
 Describe 'Backup-AuditPolicySettings / Restore-AuditPolicySettings' {
     It 'backs up via the native auditpol /backup flag' {
         Mock -ModuleName AuditPolicy -CommandName Invoke-AuditPolBinary { }
