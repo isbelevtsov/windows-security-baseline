@@ -136,7 +136,7 @@ function Invoke-RestoreRun {
                 & $restoreFunction -BackupPath $backupPath -DecryptOnRestore:$DecryptOnRestore
             }
             else {
-                & $restoreFunction -BackupPath $backupPath
+                & $restoreFunction -BackupPath $backupPath | Out-Null
                 Write-BaselineLog -Message "Restored module '$moduleName' from '$backupPath'." -LogPath $LogPath
                 [PSCustomObject]@{ Module = $moduleName; Restored = $true }
             }

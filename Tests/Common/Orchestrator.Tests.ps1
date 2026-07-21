@@ -147,10 +147,11 @@ Describe 'Invoke-BaselineRun -Mode Restore' {
         New-Item -Path (Join-Path $TestDrive 'Backups/2026-07-21_150000/Defender') -ItemType Directory -Force | Out-Null
         Set-Content -Path (Join-Path $TestDrive 'Backups/2026-07-21_150000/manifest.json') -Value (@{ Timestamp = '2026-07-21_150000'; Mode = 'Apply'; Modules = @('Defender'); OSBuild = '22631' } | ConvertTo-Json)
 
-        Mock -ModuleName Orchestrator -CommandName Restore-DefenderSettings { }
+        Mock -ModuleName Orchestrator -CommandName Restore-DefenderSettings { "some stray CLI output that should be suppressed" }
 
         $results = Invoke-BaselineRun -Mode 'Restore' -Modules @('Defender') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_160000' -SnapshotTimestamp '2026-07-21_150000'
 
+        $results.Count | Should -Be 1
         $results[0].Restored | Should -BeTrue
         Should -Invoke -ModuleName Orchestrator -CommandName Restore-DefenderSettings -Times 1
     }
