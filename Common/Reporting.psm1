@@ -1,7 +1,7 @@
 function New-BaselineAuditReport {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][object[]]$Results,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
         [Parameter(Mandatory)][string]$ReportPath
     )
 
@@ -10,7 +10,7 @@ function New-BaselineAuditReport {
         New-Item -Path $reportDir -ItemType Directory -Force | Out-Null
     }
 
-    $Results | ConvertTo-Json -Depth 5 | Set-Content -Path $ReportPath
+    ConvertTo-Json -InputObject $Results -Depth 5 | Set-Content -Path $ReportPath
 
     $passed = @($Results | Where-Object { $_.Pass }).Count
     $failed = @($Results | Where-Object { -not $_.Pass }).Count
