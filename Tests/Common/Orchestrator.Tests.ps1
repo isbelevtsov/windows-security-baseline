@@ -163,6 +163,26 @@ Describe 'Invoke-BaselineRun -Mode Apply' {
         }
     }
 
+    It 'keeps a module''s changes and manifest entry when post-apply verification throws' {
+        Mock -ModuleName Orchestrator -CommandName Backup-DefenderSettings { }
+        Mock -ModuleName Orchestrator -CommandName Set-DefenderBaseline { @([PSCustomObject]@{ Module = 'Defender'; Setting = 'X'; Before = $false; After = $true; Changed = $true }) }
+        Mock -ModuleName Orchestrator -CommandName Test-DefenderBaseline { throw 'simulated verification failure' }
+        Mock -ModuleName Orchestrator -CommandName Write-BaselineLog { }
+
+        $changes = Invoke-BaselineRun -Mode 'Apply' -Modules @('Defender') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_171000'
+
+        $changes | Should -Not -BeNullOrEmpty
+        $changes[0].Setting | Should -Be 'X'
+        $changes[0].Changed | Should -BeTrue
+
+        Should -Invoke -ModuleName Orchestrator -CommandName Write-BaselineLog -ParameterFilter {
+            $Level -eq 'Warn' -and $Message -match 'verification could not run'
+        }
+
+        $manifest = Get-Content -Path (Join-Path $TestDrive 'Backups/2026-07-21_171000/manifest.json') -Raw | ConvertFrom-Json
+        $manifest.Modules | Should -Contain 'Defender'
+    }
+
     It 'logs a Warn for a change record Note (e.g. a plaintext recovery key warning)' {
         Mock -ModuleName Orchestrator -CommandName Backup-BitLockerSettings { }
         Mock -ModuleName Orchestrator -CommandName Set-BitLockerBaseline {

@@ -96,18 +96,24 @@ function Invoke-ApplyRun {
             }
 
             # Post-apply verification: re-run Test-<Area>Baseline as the primary correctness
-            # signal for Apply, and surface any setting that is still non-compliant.
-            $verifyResults = if ($moduleName -in $script:SeceditModules) {
-                & $testFunction -Config $config[$moduleName] -WorkingCfgPath $workingCfg
-            }
-            else {
-                & $testFunction -Config $config[$moduleName]
-            }
-
-            foreach ($verifyResult in $verifyResults) {
-                if (-not $verifyResult.Pass) {
-                    Write-BaselineLog -Message "[$moduleName] Post-apply verification failed: setting '$($verifyResult.Setting)' is still non-compliant (Expected=$($verifyResult.Expected), Actual=$($verifyResult.Actual))." -Level 'Warn' -LogPath $LogPath
+            # signal for Apply, and surface any setting that is still non-compliant. A failure
+            # here must not undo the fact that Backup+Set already succeeded for this module.
+            try {
+                $verifyResults = if ($moduleName -in $script:SeceditModules) {
+                    & $testFunction -Config $config[$moduleName] -WorkingCfgPath $workingCfg
                 }
+                else {
+                    & $testFunction -Config $config[$moduleName]
+                }
+
+                foreach ($verifyResult in $verifyResults) {
+                    if (-not $verifyResult.Pass) {
+                        Write-BaselineLog -Message "[$moduleName] Post-apply verification failed: setting '$($verifyResult.Setting)' is still non-compliant (Expected=$($verifyResult.Expected), Actual=$($verifyResult.Actual))." -Level 'Warn' -LogPath $LogPath
+                    }
+                }
+            }
+            catch {
+                Write-BaselineLog -Message "[$moduleName] Post-apply verification could not run: $($_.Exception.Message)" -Level 'Warn' -LogPath $LogPath
             }
 
             $changes
