@@ -8,7 +8,7 @@ function Test-BaselineElevation {
     [CmdletBinding()]
     param()
 
-    if ($IsWindows -eq $false) {
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and $IsWindows -eq $false) {
         return $false
     }
 
