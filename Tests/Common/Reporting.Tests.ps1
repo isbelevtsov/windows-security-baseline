@@ -20,9 +20,9 @@ Describe 'New-BaselineAuditReport' {
         (Get-Content -Path $reportPath -Raw | ConvertFrom-Json).Count | Should -Be 2
     }
 
-    It 'correctly round-trips a single-element array' {
+    It 'correctly round-trips a single-element array (not unwrapped to a bare object)' {
         $results = @([PSCustomObject]@{ Module = 'Firewall'; Setting = 'DefaultInboundAction'; Expected = 'Block'; Actual = 'Block'; Pass = $true })
-        $reportPath = Join-Path $TestDrive 'audit-single.json'
+        $reportPath = Join-Path $TestDrive 'audit-one.json'
 
         $summary = New-BaselineAuditReport -Results $results -ReportPath $reportPath
 
@@ -31,7 +31,11 @@ Describe 'New-BaselineAuditReport' {
         $summary.Passed | Should -Be 1
         $summary.Failed | Should -Be 0
 
-        $parsed = Get-Content -Path $reportPath -Raw | ConvertFrom-Json
+        $content = (Get-Content -Path $reportPath -Raw).Trim()
+        $content.StartsWith('[') | Should -BeTrue
+        $content.EndsWith(']') | Should -BeTrue
+
+        $parsed = $content | ConvertFrom-Json
         @($parsed).Count | Should -Be 1
     }
 
