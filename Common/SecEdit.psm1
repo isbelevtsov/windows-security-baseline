@@ -59,7 +59,13 @@ function Set-SecurityPolicyValue {
             throw "Could not find [System Access] section in '$CfgPath'."
         }
         $sectionIndex = $sectionLine.LineNumber
-        $updated = @($updated[0..($sectionIndex - 1)]) + "$Key = $Value" + @($updated[$sectionIndex..($updated.Count - 1)])
+        if ($sectionIndex -ge $updated.Count) {
+            $tail = @()
+        }
+        else {
+            $tail = @($updated[$sectionIndex..($updated.Count - 1)])
+        }
+        $updated = @($updated[0..($sectionIndex - 1)]) + "$Key = $Value" + $tail
     }
 
     Set-Content -Path $CfgPath -Value $updated -Encoding Unicode

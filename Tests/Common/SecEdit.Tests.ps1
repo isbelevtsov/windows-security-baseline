@@ -48,6 +48,17 @@ Describe 'Set-SecurityPolicyValue' {
 
         { Set-SecurityPolicyValue -CfgPath $cfgPath -Key 'MinimumPasswordLength' -Value '14' } | Should -Throw
     }
+
+    It 'inserts a missing key correctly when [System Access] is the last line of the file' {
+        $cfgPath = Join-Path $TestDrive 'policy6.cfg'
+        Set-Content -Path $cfgPath -Encoding Unicode -Value @('[Version]', 'signature=test', '[System Access]')
+
+        Set-SecurityPolicyValue -CfgPath $cfgPath -Key 'MinimumPasswordLength' -Value '14'
+
+        Get-SecurityPolicyValue -CfgPath $cfgPath -Key 'MinimumPasswordLength' | Should -Be '14'
+        $lines = @(Get-Content -Path $cfgPath -Encoding Unicode)
+        ($lines | Where-Object { $_ -eq '[System Access]' }).Count | Should -Be 1
+    }
 }
 
 Describe 'Invoke-SecEditExport / Invoke-SecEditConfigure' {
