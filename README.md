@@ -39,6 +39,28 @@ and [implementation plan](docs/superpowers/plans) for the full architecture.
   install.
 - An elevated (Administrator) PowerShell session.
 
+### Execution policy
+
+If you copied or downloaded this repo rather than cloning it locally, Windows
+marks the files as coming from another machine and blocks them regardless of
+execution policy. Unblock them first:
+
+```powershell
+Get-ChildItem -Path . -Recurse -Filter *.ps1  | Unblock-File
+Get-ChildItem -Path . -Recurse -Filter *.psm1 | Unblock-File
+```
+
+If PowerShell still refuses to run the script (`... is not digitally signed
+...`), scope the bypass to the current session only — don't change execution
+policy machine-wide:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+.\Invoke-SecurityBaseline.ps1 -Mode Audit
+```
+
+`-Scope Process` reverts automatically when that PowerShell window closes.
+
 ## Quick start
 
 ```powershell
