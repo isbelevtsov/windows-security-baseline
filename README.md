@@ -59,6 +59,23 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 .\Invoke-SecurityBaseline.ps1 -Mode Audit
 ```
 
+**Preferred alternative: code-sign the scripts once, per machine.** Since
+these are standalone/workgroup devices with no domain to push a trusted CA
+root, run [`Tools\Sign-Scripts.ps1`](Tools/Sign-Scripts.ps1) (elevated) —
+it creates (or reuses) a self-signed code-signing certificate, installs it
+into the LocalMachine Trusted Root and Trusted Publisher stores, and signs
+every `.ps1`/`.psm1` file in the repo:
+
+```powershell
+.\Tools\Sign-Scripts.ps1
+```
+
+After that, the toolkit runs under `RemoteSigned` or `AllSigned` execution
+policy with no per-session bypass needed. Re-run it whenever a script file
+changes — editing a signed file invalidates its signature. If your
+organization already has a code-signing certificate, pass its thumbprint
+with `-CertificateThumbprint` instead of creating a self-signed one.
+
 `-Scope Process` reverts automatically when that PowerShell window closes.
 
 ## Quick start
