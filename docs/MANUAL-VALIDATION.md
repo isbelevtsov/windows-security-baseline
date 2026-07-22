@@ -143,3 +143,40 @@ compare against what this fix expects, or try manually clicking "Turn on
 BitLocker" in the Control Panel once to see whether the GUI wizard succeeds
 where the PowerShell cmdlet path doesn't (which would point at a deeper
 BitLocker.psm1/cmdletization quirk beyond what this fix addresses).
+
+### 2026-07-23 — same machine, second follow-up: EncryptionMethod conflict
+
+The fix above hit a second issue on the very next retry:
+
+```
+Write-BaselineLog : Apply of module 'BitLocker' failed, skipping:
+Value does not fall within the expected range.
+```
+
+Two things wrong: (1) `Enable-BitLocker -EncryptionMethod ... -RecoveryPasswordProtector`
+threw when called on a volume that already has a TPM protector staged —
+"Value does not fall within the expected range" is a generic enum-validation
+error from the cmdletization layer, most likely because re-specifying an
+encryption method conflicts with whatever was already implicitly set when
+the TPM protector was pre-staged. (2) That whole code branch (the
+"TPM already present" path from the first fix) had **no try/catch around it
+at all**, so the exception propagated all the way out of
+`Enable-OsDriveBitLocker`, past `Set-BitLockerBaseline`, and was only ever
+caught by the Orchestrator's generic per-module catch-all — which is why the
+log said "Apply of module 'BitLocker' failed, skipping" rather than
+something BitLocker-specific.
+
+Fixed in `Modules/BitLocker.psm1`: both the "TPM already present" branch and
+the "fresh TPM add failed, falling back to recovery password" branch now
+retry without `-EncryptionMethod` if the with-method attempt throws (Windows
+then uses whatever is already configured, or its platform default —
+`XtsAes256` on modern Windows). Regression tests added reproducing this
+exact throw and asserting it's caught, not propagated.
+
+**Still not independently confirmed on real hardware.** After this fix,
+please check `Get-BitLockerVolume -MountPoint C: | Format-List *` (or
+`manage-bde -status C:`) and share the full output if it's still not
+reaching `ProtectionStatus = On` — two guesses in a row needed correction
+from real-hardware feedback, so a full diagnostic dump this time (rather
+than another log excerpt) would let the next fix be verified against the
+actual state instead of inferred from an error message alone.

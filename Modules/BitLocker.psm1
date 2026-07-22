@@ -18,6 +18,19 @@ function Invoke-EnableBitLockerWithRecoveryPasswordProtector {
     Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -RecoveryPasswordProtector -SkipHardwareTest -ErrorAction Stop
 }
 
+function Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly {
+    [CmdletBinding()]
+    param()
+    # Omits -EncryptionMethod. Confirmed on real hardware: when the volume
+    # already has other BitLocker metadata (e.g. a pre-staged TPM protector),
+    # re-specifying an encryption method can conflict with what's already
+    # configured on the volume and throws "Value does not fall within the
+    # expected range." - a generic enum-validation message from the underlying
+    # cmdletization layer. Omitting it lets Windows use whatever is already
+    # configured (or its platform default, XtsAes256 on modern Windows).
+    Enable-BitLocker -MountPoint $env:SystemDrive -RecoveryPasswordProtector -SkipHardwareTest -ErrorAction Stop
+}
+
 function Add-OsDriveRecoveryPasswordProtector {
     [CmdletBinding()]
     param()
@@ -42,7 +55,12 @@ function Enable-OsDriveBitLocker {
     $existingProtectorTypes = @((Get-OsDriveBitLockerVolume).KeyProtector | Select-Object -ExpandProperty KeyProtectorType)
 
     if ($existingProtectorTypes -contains 'Tpm') {
-        Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
+        try {
+            Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
+        }
+        catch {
+            Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
+        }
         return $true
     }
 
@@ -52,7 +70,12 @@ function Enable-OsDriveBitLocker {
         return $true
     }
     catch {
-        Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
+        try {
+            Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
+        }
+        catch {
+            Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
+        }
         return $false
     }
 }
