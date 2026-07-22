@@ -34,7 +34,7 @@ Describe 'Test-BitLockerBaseline' {
 Describe 'Set-BitLockerBaseline' {
     It 'attempts to enable encryption and saves the recovery key when not yet protected' {
         Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
-        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { $true }
         Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
 
         $changes = Set-BitLockerBaseline -Config (New-TestConfig)
@@ -48,7 +48,7 @@ Describe 'Set-BitLockerBaseline' {
 
     It 'includes a Note warning about the plaintext recovery key when a key is written' {
         Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
-        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { $true }
         Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
 
         $changes = Set-BitLockerBaseline -Config (New-TestConfig)
@@ -56,6 +56,17 @@ Describe 'Set-BitLockerBaseline' {
         $changes[0].Note | Should -Not -BeNullOrEmpty
         $changes[0].Note | Should -Match 'plaintext'
         $changes[0].Note | Should -Match ([regex]::Escape((Join-Path $TestDrive 'RecoveryKeys')))
+    }
+
+    It 'adds a Note about the missing TPM protector when Enable-OsDriveBitLocker falls back to recovery-password-only' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { $false }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
+
+        $changes = Set-BitLockerBaseline -Config (New-TestConfig)
+
+        $changes[0].Note | Should -Match 'TPM'
+        $changes[0].Note | Should -Match 'plaintext'
     }
 
     It 'does nothing when already protected' {

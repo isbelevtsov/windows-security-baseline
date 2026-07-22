@@ -42,6 +42,26 @@ Describe 'Set-FirewallBaseline' {
 
         Should -Invoke -ModuleName Firewall -CommandName Set-FirewallProfileState -Times 1 -ParameterFilter { $ProfileName -eq 'Public' }
     }
+
+    It 'passes Enabled/LogAllowed/LogBlocked as GpoBoolean-compatible strings, not native booleans' {
+        # Set-NetFirewallProfile's -Enabled/-LogAllowed/-LogBlocked are typed as
+        # Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetSecurity.GpoBoolean, which
+        # cannot be bound from a native [bool] - real Windows throws "Invalid cast from
+        # 'System.Boolean' to '...GpoBoolean'" if a raw $true/$false is passed.
+        Mock -ModuleName Firewall -CommandName Get-FirewallProfileState {
+            param($ProfileName)
+            [PSCustomObject]@{ Enabled = $false; DefaultInboundAction = 'Allow'; LogAllowed = $false; LogBlocked = $false }
+        }
+        Mock -ModuleName Firewall -CommandName Set-FirewallProfileState { }
+
+        Set-FirewallBaseline -Config (New-TestConfig) | Out-Null
+
+        Should -Invoke -ModuleName Firewall -CommandName Set-FirewallProfileState -ParameterFilter {
+            $Settings.Enabled -is [string] -and $Settings.Enabled -eq 'True' -and
+            $Settings.LogAllowed -is [string] -and $Settings.LogAllowed -eq 'True' -and
+            $Settings.LogBlocked -is [string] -and $Settings.LogBlocked -eq 'True'
+        }
+    }
 }
 
 Describe 'Backup-FirewallSettings / Restore-FirewallSettings' {

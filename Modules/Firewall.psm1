@@ -82,11 +82,16 @@ function Set-FirewallBaseline {
         $needsChange = @($profileResults | Where-Object { -not $_.Pass }).Count -gt 0
 
         if ($needsChange) {
+            # Set-NetFirewallProfile's -Enabled/-LogAllowed/-LogBlocked are typed as
+            # Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetSecurity.GpoBoolean,
+            # not a native [bool] - PowerShell cannot auto-cast $true/$false to it, only
+            # the strings 'True'/'False' (confirmed against a real Windows 11 Pro Apply run).
+            $loggingValue = $(if ($expectedLogging) { 'True' } else { 'False' })
             Set-FirewallProfileState -ProfileName $profileName -Settings @{
-                Enabled              = $true
+                Enabled              = 'True'
                 DefaultInboundAction = $expectedInbound
-                LogAllowed           = $expectedLogging
-                LogBlocked           = $expectedLogging
+                LogAllowed           = $loggingValue
+                LogBlocked           = $loggingValue
             }
         }
 

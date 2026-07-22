@@ -51,6 +51,12 @@ BitLocker for real.
       crashing (Home, if Device Encryption prerequisites like a TPM aren't present in
       the test VM). A recovery key `.txt` file exists under
       `C:\ProgramData\SecurityBaseline\RecoveryKeys\`.
+      **If the log still shows a Warn "Post-apply verification failed" for
+      `OSDriveEncrypted`** after the TPM-protector fix (see Findings below),
+      **restart the machine** and re-run `-Mode Audit -Modules BitLocker` — BitLocker
+      on the OS drive is known to sometimes require a reboot to fully activate
+      protection even with a proper protector configured, and this hasn't yet been
+      confirmed one way or the other on real hardware.
 - [ ] Re-run `.\Invoke-SecurityBaseline.ps1 -Mode Apply` immediately again — the log
       for the second run shows `Changed=False` for every setting (idempotency).
 
@@ -73,3 +79,26 @@ BitLocker for real.
 - [ ] Both Home and Pro/Enterprise runs completed with no unexpected exceptions.
 - [ ] Any deviations from the checklist are written up in this file (append a "Findings"
       section) before merging.
+
+## Findings
+
+### 2026-07-23 — Windows 11 Pro, `-Mode Apply`
+
+Two real bugs found, invisible to the mocked test suite, both fixed:
+
+- **Firewall module crashed entirely.** `Set-NetFirewallProfile`'s
+  `-Enabled`/`-LogAllowed`/`-LogBlocked` parameters are typed as
+  `Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetSecurity.GpoBoolean`, not a
+  native `[bool]` — PowerShell can't auto-cast `$true`/`$false` to it, only the
+  literal strings `'True'`/`'False'`. Fixed in `Modules/Firewall.psm1`; regression
+  test added asserting the values passed to the cmdlet wrapper are strings, not
+  booleans.
+- **BitLocker apply reported `Changed=True` but post-apply verification found
+  `ProtectionStatus` still `Off`.** `Enable-OsDriveBitLocker` was only adding a
+  `-RecoveryPasswordProtector` — meant as a backup protector, not a primary one.
+  Fixed to add a TPM protector as primary (falling back to recovery-password-only
+  if no usable TPM is present), with the recovery password added as a secondary
+  protector either way. **Not yet confirmed on real hardware whether this alone
+  is sufficient, or whether a restart is additionally required** for
+  `ProtectionStatus` to flip to `On` — re-run the BitLocker Apply/Audit check
+  above and update this entry with the result.

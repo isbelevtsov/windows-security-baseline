@@ -9,7 +9,23 @@ function Get-OsDriveBitLockerVolume {
 function Enable-OsDriveBitLocker {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$EncryptionMethod)
-    Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -RecoveryPasswordProtector -SkipHardwareTest
+
+    # A recovery-password protector alone is meant as a backup, not the primary
+    # protector: on a real OS drive, ProtectionStatus generally will not engage
+    # without an unattended-unlock-capable protector (TPM). Add TPM as primary,
+    # then the recovery password as a secondary protector (confirmed necessary
+    # against a real Windows 11 Pro Apply run, where ProtectionStatus stayed
+    # Off with only -RecoveryPasswordProtector). Falls back to
+    # recovery-password-only if no usable TPM is present.
+    try {
+        Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -TpmProtector -SkipHardwareTest | Out-Null
+        Add-BitLockerKeyProtector -MountPoint $env:SystemDrive -RecoveryPasswordProtector | Out-Null
+        return $true
+    }
+    catch {
+        Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -RecoveryPasswordProtector -SkipHardwareTest | Out-Null
+        return $false
+    }
 }
 
 function Disable-OsDriveBitLocker {
@@ -81,7 +97,7 @@ function Set-BitLockerBaseline {
     $note = $null
 
     if (-not $before.Pass) {
-        Enable-OsDriveBitLocker -EncryptionMethod $method
+        $tpmProtectorAdded = Enable-OsDriveBitLocker -EncryptionMethod $method
 
         if (-not (Test-Path -Path $keyFolder)) {
             New-Item -Path $keyFolder -ItemType Directory -Force | Out-Null
@@ -93,6 +109,12 @@ function Set-BitLockerBaseline {
             Set-Content -Path $keyFile -Value $recoveryKey
             $note = "Recovery key written in plaintext to '$keyFile' - secure or relocate it."
         }
+
+        if (-not $tpmProtectorAdded) {
+            $tpmNote = 'Only a recovery-password protector could be added (no usable TPM protector found) - BitLocker may remain in a not-fully-protected state until a protector capable of automatic unlock is configured, or after a restart.'
+            $note = $(if ($note) { "$note $tpmNote" } else { $tpmNote })
+        }
+
         $changed = $true
     }
 
