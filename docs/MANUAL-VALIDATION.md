@@ -102,3 +102,44 @@ Two real bugs found, invisible to the mocked test suite, both fixed:
   is sufficient, or whether a restart is additionally required** for
   `ProtectionStatus` to flip to `On` — re-run the BitLocker Apply/Audit check
   above and update this entry with the result.
+
+### 2026-07-23 — same machine, follow-up: BitLocker fix above was insufficient
+
+Restarting did not resolve it. Real error surfaced on retry:
+
+```
+Add-TpmProtectorInternal : This key protector cannot be added. Only one key
+protector of this type is allowed for this drive. (Exception from HRESULT: 0x80310031)
+```
+
+Root cause: Windows had already pre-staged a TPM key protector on the OS drive
+(common as part of "Device Encryption" readiness, even before BitLocker is
+manually turned on) — so `-TpmProtector` failed. Critically, that error comes
+from a **non-terminating `Write-Error`** inside Microsoft's own `BitLocker.psm1`,
+not a normal exception, so the `try`/`catch` from the first fix never saw it —
+it silently continued as if the call had succeeded, added a redundant recovery
+password protector, and left the volume in **"BitLocker waiting for
+activation"** (confirmed via the Control Panel BitLocker page) — protectors
+staged, but encryption itself never started. This is also why a restart didn't
+help: there was nothing "paused" to resume.
+
+Fixed in `Modules/BitLocker.psm1`:
+- Check for an existing TPM protector before ever requesting `-TpmProtector`;
+  skip straight to activating with `-RecoveryPasswordProtector` if one is
+  already present (the pre-existing TPM protector is retained alongside it).
+- Every `Enable-BitLocker`/`Add-BitLockerKeyProtector` call now uses
+  `-ErrorAction Stop`, so any future failure of this kind is actually
+  catchable instead of silently passing through.
+- Regression tests added directly against this branching logic (not just
+  against `Set-BitLockerBaseline` with the whole function mocked away, which
+  is exactly why this didn't get caught the first time).
+
+**Still not independently confirmed on real hardware** whether this fully
+resolves activation on a drive that already has a pre-staged TPM protector —
+re-run `-Mode Apply` and update this entry with the result. If it's still
+stuck in "waiting for activation," check `Get-BitLockerVolume | Select
+-ExpandProperty KeyProtector` for the exact current protector state and
+compare against what this fix expects, or try manually clicking "Turn on
+BitLocker" in the Control Panel once to see whether the GUI wizard succeeds
+where the PowerShell cmdlet path doesn't (which would point at a deeper
+BitLocker.psm1/cmdletization quirk beyond what this fix addresses).

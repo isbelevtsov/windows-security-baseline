@@ -31,6 +31,56 @@ Describe 'Test-BitLockerBaseline' {
     }
 }
 
+Describe 'Enable-OsDriveBitLocker' {
+    It 'activates with RecoveryPasswordProtector only, without attempting to add a TPM protector, when a TPM protector already exists' {
+        # Regression test for a real Windows 11 Pro failure: requesting -TpmProtector
+        # when one already exists throws "Only one key protector of this type is
+        # allowed for this drive" via a non-terminating Write-Error that a plain
+        # try/catch never sees - so this path must never even attempt it.
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @([PSCustomObject]@{ KeyProtectorType = 'Tpm' }) }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector { }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector { }
+        Mock -ModuleName BitLocker -CommandName Add-OsDriveRecoveryPasswordProtector { }
+
+        $result = InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' }
+
+        $result | Should -BeTrue
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector -Times 0
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector -Times 1
+    }
+
+    It 'adds a fresh TPM protector plus a recovery password protector when no protectors exist yet' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @() }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector { }
+        Mock -ModuleName BitLocker -CommandName Add-OsDriveRecoveryPasswordProtector { }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector { }
+
+        $result = InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' }
+
+        $result | Should -BeTrue
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector -Times 1
+        Should -Invoke -ModuleName BitLocker -CommandName Add-OsDriveRecoveryPasswordProtector -Times 1
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector -Times 0
+    }
+
+    It 'falls back to RecoveryPasswordProtector-only when adding a fresh TPM protector throws' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @() }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector { throw 'no usable TPM' }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector { }
+
+        $result = InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' }
+
+        $result | Should -BeFalse
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector -Times 1
+    }
+}
+
 Describe 'Set-BitLockerBaseline' {
     It 'attempts to enable encryption and saves the recovery key when not yet protected' {
         Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }

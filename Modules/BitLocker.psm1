@@ -6,24 +6,53 @@ function Get-OsDriveBitLockerVolume {
     Get-BitLockerVolume -MountPoint $env:SystemDrive
 }
 
+function Invoke-EnableBitLockerWithTpmProtector {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$EncryptionMethod)
+    Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -TpmProtector -SkipHardwareTest -ErrorAction Stop
+}
+
+function Invoke-EnableBitLockerWithRecoveryPasswordProtector {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$EncryptionMethod)
+    Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -RecoveryPasswordProtector -SkipHardwareTest -ErrorAction Stop
+}
+
+function Add-OsDriveRecoveryPasswordProtector {
+    [CmdletBinding()]
+    param()
+    Add-BitLockerKeyProtector -MountPoint $env:SystemDrive -RecoveryPasswordProtector -ErrorAction Stop
+}
+
 function Enable-OsDriveBitLocker {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$EncryptionMethod)
 
-    # A recovery-password protector alone is meant as a backup, not the primary
-    # protector: on a real OS drive, ProtectionStatus generally will not engage
-    # without an unattended-unlock-capable protector (TPM). Add TPM as primary,
-    # then the recovery password as a secondary protector (confirmed necessary
-    # against a real Windows 11 Pro Apply run, where ProtectionStatus stayed
-    # Off with only -RecoveryPasswordProtector). Falls back to
-    # recovery-password-only if no usable TPM is present.
+    # Windows commonly pre-stages a TPM key protector on the OS drive before
+    # BitLocker is ever turned on (part of "Device Encryption" readiness).
+    # Confirmed on real Windows 11 Pro hardware: requesting -TpmProtector again
+    # in that state fails with "Only one key protector of this type is allowed
+    # for this drive" - and critically, BitLocker.psm1 raises that via a
+    # non-terminating Write-Error, not a normal exception, so a plain try/catch
+    # never saw it and silently continued as if it had succeeded, while the
+    # volume was actually left in "waiting for activation" with encryption
+    # never started. Checking for an existing TPM protector first avoids ever
+    # hitting that failure; -ErrorAction Stop on every call below ensures any
+    # other failure is genuinely catchable.
+    $existingProtectorTypes = @((Get-OsDriveBitLockerVolume).KeyProtector | Select-Object -ExpandProperty KeyProtectorType)
+
+    if ($existingProtectorTypes -contains 'Tpm') {
+        Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
+        return $true
+    }
+
     try {
-        Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -TpmProtector -SkipHardwareTest | Out-Null
-        Add-BitLockerKeyProtector -MountPoint $env:SystemDrive -RecoveryPasswordProtector | Out-Null
+        Invoke-EnableBitLockerWithTpmProtector -EncryptionMethod $EncryptionMethod | Out-Null
+        Add-OsDriveRecoveryPasswordProtector | Out-Null
         return $true
     }
     catch {
-        Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -RecoveryPasswordProtector -SkipHardwareTest | Out-Null
+        Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
         return $false
     }
 }
