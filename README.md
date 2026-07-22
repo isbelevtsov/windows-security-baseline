@@ -59,22 +59,34 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 .\Invoke-SecurityBaseline.ps1 -Mode Audit
 ```
 
-**Preferred alternative: code-sign the scripts once, per machine.** Since
+**Preferred alternative: code-sign the scripts once per account.** Since
 these are standalone/workgroup devices with no domain to push a trusted CA
-root, run [`Tools\Sign-Scripts.ps1`](Tools/Sign-Scripts.ps1) (elevated) —
-it creates (or reuses) a self-signed code-signing certificate, installs it
-into the LocalMachine Trusted Root and Trusted Publisher stores, and signs
-every `.ps1`/`.psm1` file in the repo:
+root, run [`Tools\Sign-Scripts.ps1`](Tools/Sign-Scripts.ps1) — it creates
+(or reuses) a self-signed code-signing certificate with a non-exportable
+private key, installs it into a Trusted Root/Trusted Publisher store, and
+signs every `.ps1`/`.psm1` file in the repo:
 
 ```powershell
 .\Tools\Sign-Scripts.ps1
 ```
 
+**Read the warning it prints before confirming.** Adding a certificate to a
+Trusted Root store isn't scoped to "PowerShell script signing" — that store
+is consulted for all certificate validation in its scope (TLS, S/MIME, other
+code signing). By default the script scopes both the private key and the
+trust grant to your account only (`-Scope CurrentUser`), so it only affects
+certificate validation for the account that's actually going to run the
+toolkit. Pass `-Scope LocalMachine` only if multiple accounts need to run
+signed scripts — that extends the trust grant to every account on the
+machine and requires an elevated session.
+
 After that, the toolkit runs under `RemoteSigned` or `AllSigned` execution
 policy with no per-session bypass needed. Re-run it whenever a script file
 changes — editing a signed file invalidates its signature. If your
 organization already has a code-signing certificate, pass its thumbprint
-with `-CertificateThumbprint` instead of creating a self-signed one.
+with `-CertificateThumbprint` instead of creating a self-signed one — this
+avoids the self-signed root-trust tradeoff entirely, since a properly issued
+certificate chains to a CA your machine already trusts.
 
 `-Scope Process` reverts automatically when that PowerShell window closes.
 
