@@ -37,6 +37,13 @@ function Add-OsDriveRecoveryPasswordProtector {
     Add-BitLockerKeyProtector -MountPoint $env:SystemDrive -RecoveryPasswordProtector -ErrorAction Stop
 }
 
+function Test-OsDriveHasRecoveryPasswordProtector {
+    [CmdletBinding()]
+    param()
+    $types = @((Get-OsDriveBitLockerVolume).KeyProtector | Select-Object -ExpandProperty KeyProtectorType)
+    return ($types -contains 'RecoveryPassword')
+}
+
 function Enable-OsDriveBitLocker {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$EncryptionMethod)
@@ -52,6 +59,18 @@ function Enable-OsDriveBitLocker {
     # never started. Checking for an existing TPM protector first avoids ever
     # hitting that failure; -ErrorAction Stop on every call below ensures any
     # other failure is genuinely catchable.
+    #
+    # Confirmed separately on a volume where Windows had already started
+    # "Device Encryption" automatically (encryption in progress, no protector
+    # yet): Invoke-EnableBitLockerWithRecoveryPasswordProtector raised a
+    # terminating error (EncryptionMethod conflicting with the in-progress
+    # conversion) even though the underlying protector-add had already been
+    # committed (confirmed via the BitLocker-API event log, which showed a
+    # successful "key protector was created" event despite the cmdlet
+    # throwing). Retrying blindly in that case added a second, redundant
+    # recovery password protector whose password was never recorded anywhere.
+    # Every fallback below now re-checks for an existing RecoveryPassword
+    # protector before adding another one.
     $existingProtectorTypes = @((Get-OsDriveBitLockerVolume).KeyProtector | Select-Object -ExpandProperty KeyProtectorType)
 
     if ($existingProtectorTypes -contains 'Tpm') {
@@ -59,22 +78,31 @@ function Enable-OsDriveBitLocker {
             Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
         }
         catch {
-            Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
+            if (-not (Test-OsDriveHasRecoveryPasswordProtector)) {
+                Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
+            }
         }
         return $true
     }
 
     try {
         Invoke-EnableBitLockerWithTpmProtector -EncryptionMethod $EncryptionMethod | Out-Null
-        Add-OsDriveRecoveryPasswordProtector | Out-Null
+        if (-not (Test-OsDriveHasRecoveryPasswordProtector)) {
+            Add-OsDriveRecoveryPasswordProtector | Out-Null
+        }
         return $true
     }
     catch {
+        if (Test-OsDriveHasRecoveryPasswordProtector) {
+            return $false
+        }
         try {
             Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
         }
         catch {
-            Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
+            if (-not (Test-OsDriveHasRecoveryPasswordProtector)) {
+                Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
+            }
         }
         return $false
     }

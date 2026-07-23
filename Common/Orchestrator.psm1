@@ -54,7 +54,7 @@ function Invoke-AuditRun {
     Write-BaselineAuditSummary -Results $allResults
     Write-BaselineLog -Message "Audit complete: $($summary.Passed)/$($summary.Total) settings passed. Report: $reportPath" -LogPath $LogPath
 
-    Write-Output -NoEnumerate @($allResults)
+    return $allResults
 }
 
 function Invoke-ApplyRun {
@@ -132,7 +132,7 @@ function Invoke-ApplyRun {
         Write-BaselineApplySummary -ChangeRecords @($allChanges) -BackupPath $backupRoot -LogPath $LogPath
     }
 
-    Write-Output -NoEnumerate @($allChanges)
+    return @($allChanges)
 }
 
 function Invoke-RestoreRun {
@@ -174,7 +174,7 @@ function Invoke-RestoreRun {
         }
     }
 
-    Write-Output -NoEnumerate @($results)
+    return @($results)
 }
 
 function Invoke-BaselineRun {
@@ -202,13 +202,11 @@ function Invoke-BaselineRun {
     $logPath = Join-Path -Path $RootPath -ChildPath (Join-Path 'Logs' "$RunTimestamp.log")
     Write-BaselineLog -Message "Starting $Mode run for modules: $($Modules -join ', ')" -LogPath $logPath
 
-    $runResult = switch ($Mode) {
-        'Audit'   { Invoke-AuditRun -Modules $Modules -RootPath $RootPath -ConfigPath $ConfigPath -RunTimestamp $RunTimestamp -LogPath $logPath }
-        'Apply'   { Invoke-ApplyRun -Modules $Modules -RootPath $RootPath -ConfigPath $ConfigPath -RunTimestamp $RunTimestamp -LogPath $logPath }
-        'Restore' { Invoke-RestoreRun -Modules $Modules -RootPath $RootPath -SnapshotTimestamp $SnapshotTimestamp -Latest:$Latest -LogPath $logPath -DecryptOnRestore:$DecryptOnRestore }
+    switch ($Mode) {
+        'Audit'   { return Invoke-AuditRun -Modules $Modules -RootPath $RootPath -ConfigPath $ConfigPath -RunTimestamp $RunTimestamp -LogPath $logPath }
+        'Apply'   { return Invoke-ApplyRun -Modules $Modules -RootPath $RootPath -ConfigPath $ConfigPath -RunTimestamp $RunTimestamp -LogPath $logPath }
+        'Restore' { return Invoke-RestoreRun -Modules $Modules -RootPath $RootPath -SnapshotTimestamp $SnapshotTimestamp -Latest:$Latest -LogPath $logPath -DecryptOnRestore:$DecryptOnRestore }
     }
-
-    Write-Output -NoEnumerate @($runResult)
 }
 
 Export-ModuleMember -Function Invoke-BaselineRun

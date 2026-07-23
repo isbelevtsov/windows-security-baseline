@@ -2,18 +2,32 @@ Import-Module (Join-Path $PSScriptRoot '..\Common\Config.psm1') -Force
 
 $script:RdpRegistryPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
 
-function Get-RdpDenyValue {
+function Get-RdpDenyRawValue {
     [CmdletBinding()]
     param()
     $item = Get-ItemProperty -Path $script:RdpRegistryPath -Name 'fDenyTSConnections' -ErrorAction SilentlyContinue
     if ($null -eq $item) { return $null }
-    return [bool]$item.fDenyTSConnections
+    return [int]$item.fDenyTSConnections
+}
+
+function Get-RdpDenyValue {
+    [CmdletBinding()]
+    param()
+    $raw = Get-RdpDenyRawValue
+    if ($null -eq $raw) { return $null }
+    return [bool]$raw
 }
 
 function Set-RdpDenyValue {
     [CmdletBinding()]
     param([Parameter(Mandatory)][bool]$Deny)
     Set-ItemProperty -Path $script:RdpRegistryPath -Name 'fDenyTSConnections' -Value ([int]$Deny) -Type DWord
+}
+
+function Remove-RdpDenyValue {
+    [CmdletBinding()]
+    param()
+    Remove-ItemProperty -Path $script:RdpRegistryPath -Name 'fDenyTSConnections' -ErrorAction SilentlyContinue
 }
 
 function Get-Smb1Enabled {
@@ -45,24 +59,6 @@ function Set-GuestAccountEnabled {
     }
 }
 
-function Export-RemoteAccessRegistry {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$RegPath)
-    & reg.exe export 'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server' $RegPath /y
-    if ($LASTEXITCODE -ne 0) {
-        throw "reg.exe failed with exit code $LASTEXITCODE (arguments: export 'HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server' $RegPath /y)"
-    }
-}
-
-function Import-RemoteAccessRegistry {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$RegPath)
-    & reg.exe import $RegPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "reg.exe failed with exit code $LASTEXITCODE (arguments: import $RegPath)"
-    }
-}
-
 function Test-RemoteAccessBaseline {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable]$Config)
@@ -87,16 +83,26 @@ function Backup-RemoteAccessSettings {
     param([Parameter(Mandatory)][string]$BackupPath)
 
     New-Item -Path $BackupPath -ItemType Directory -Force | Out-Null
-    $regPath = Join-Path -Path $BackupPath -ChildPath 'remote-access.reg'
-    Export-RemoteAccessRegistry -RegPath $regPath
+
+    # RDP state is captured as a single named value rather than a full
+    # `reg export`/`reg import` of the whole Terminal Server key. Confirmed on
+    # real Windows hardware: that key tree includes subkeys owned by the
+    # actively-running Terminal Services listener (e.g. WinStations\RDP-Tcp,
+    # RCM) that `reg import` cannot overwrite while the service holds them
+    # open, so Restore failed with "Error accessing the registry" every time
+    # even though the export itself succeeded. Only fDenyTSConnections is
+    # ever written by this module, so only that value needs to round-trip.
+    $rdpRawValue = Get-RdpDenyRawValue
 
     $statePath = Join-Path -Path $BackupPath -ChildPath 'remote-access-state.json'
     [PSCustomObject]@{
-        Smb1Enabled  = Get-Smb1Enabled
-        GuestEnabled = Get-GuestAccountEnabled
+        Smb1Enabled         = Get-Smb1Enabled
+        GuestEnabled        = Get-GuestAccountEnabled
+        RdpDenyValueExisted = ($null -ne $rdpRawValue)
+        RdpDenyValue        = $rdpRawValue
     } | ConvertTo-Json | Set-Content -Path $statePath
 
-    return @($regPath, $statePath)
+    return @($statePath)
 }
 
 function Set-RemoteAccessBaseline {
@@ -130,16 +136,21 @@ function Restore-RemoteAccessSettings {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$BackupPath)
 
-    $regPath = Join-Path -Path $BackupPath -ChildPath 'remote-access.reg'
     $statePath = Join-Path -Path $BackupPath -ChildPath 'remote-access-state.json'
 
-    if (-not (Test-Path -Path $regPath) -or -not (Test-Path -Path $statePath)) {
+    if (-not (Test-Path -Path $statePath)) {
         throw "No remote access backup found at '$BackupPath'."
     }
 
-    Import-RemoteAccessRegistry -RegPath $regPath
-
     $saved = Get-Content -Path $statePath -Raw | ConvertFrom-Json
+
+    if ($saved.RdpDenyValueExisted) {
+        Set-ItemProperty -Path $script:RdpRegistryPath -Name 'fDenyTSConnections' -Value ([int]$saved.RdpDenyValue) -Type DWord
+    }
+    else {
+        Remove-RdpDenyValue
+    }
+
     Set-Smb1Enabled -Enabled $saved.Smb1Enabled
     Set-GuestAccountEnabled -Enabled $saved.GuestEnabled
 }

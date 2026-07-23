@@ -216,7 +216,13 @@ Describe 'Invoke-BaselineRun -Mode Restore' {
 
         Mock -ModuleName Orchestrator -CommandName Restore-DefenderSettings { "some stray CLI output that should be suppressed" }
 
-        $results = Invoke-BaselineRun -Mode 'Restore' -Modules @('Defender') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_160000' -SnapshotTimestamp '2026-07-21_150000'
+        # Wrapped in @() because a 1-element result, like any normal PowerShell
+        # pipeline output, collapses to a bare scalar on direct assignment -
+        # that's standard behavior (same as e.g. Get-ChildItem), not a defect,
+        # and the array-safe idiom is to guard at the point of consumption
+        # rather than fight it in the producer (which would otherwise break
+        # normal downstream piping of Invoke-SecurityBaseline.ps1's output).
+        $results = @(Invoke-BaselineRun -Mode 'Restore' -Modules @('Defender') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_160000' -SnapshotTimestamp '2026-07-21_150000')
 
         $results.Count | Should -Be 1
         $results[0].Restored | Should -BeTrue

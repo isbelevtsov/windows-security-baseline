@@ -112,6 +112,68 @@ Describe 'Enable-OsDriveBitLocker' {
         $result | Should -BeFalse
         Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly -Times 1
     }
+
+    It 'does not add a duplicate recovery password protector when the with-method call throws after already committing one' {
+        # Regression test for a real bug found on a volume where Windows had
+        # already started "Device Encryption" automatically: the BitLocker-API
+        # event log showed the recovery password protector was created
+        # successfully, but Invoke-EnableBitLockerWithRecoveryPasswordProtector
+        # still raised a terminating error (EncryptionMethod conflicting with
+        # the in-progress conversion). The old code blindly retried on any
+        # throw, adding a second, untracked recovery password protector.
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @([PSCustomObject]@{ KeyProtectorType = 'RecoveryPassword' }) }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector { throw 'no usable TPM' }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector { throw 'Value does not fall within the expected range.' }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly { }
+
+        $result = InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' }
+
+        $result | Should -BeFalse
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly -Times 0
+    }
+
+    It 'does not add a duplicate recovery password protector when the TPM-already-present with-method call throws after already committing one' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @([PSCustomObject]@{ KeyProtectorType = 'Tpm' }, [PSCustomObject]@{ KeyProtectorType = 'RecoveryPassword' }) }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector { throw 'Value does not fall within the expected range.' }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly { }
+
+        $result = InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' }
+
+        $result | Should -BeTrue
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly -Times 0
+    }
+
+    It 'does not add a duplicate recovery password protector when the fresh-TPM call itself already committed one before throwing' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @([PSCustomObject]@{ KeyProtectorType = 'RecoveryPassword' }) }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector { throw 'no usable TPM' }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector { }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly { }
+
+        $result = InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' }
+
+        $result | Should -BeFalse
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtector -Times 0
+        Should -Invoke -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly -Times 0
+    }
+
+    It 'does not add a redundant recovery password protector when the fresh-TPM call succeeds but already carried one along' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @([PSCustomObject]@{ KeyProtectorType = 'RecoveryPassword' }) }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector { }
+        Mock -ModuleName BitLocker -CommandName Add-OsDriveRecoveryPasswordProtector { }
+
+        $result = InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' }
+
+        $result | Should -BeTrue
+        Should -Invoke -ModuleName BitLocker -CommandName Add-OsDriveRecoveryPasswordProtector -Times 0
+    }
 }
 
 Describe 'Set-BitLockerBaseline' {
