@@ -6,13 +6,17 @@ Audit / Apply / Restore modes and automatic backup before every change.
 
 ## Status
 
-Built and tested on non-Windows dev hardware — every OS interaction (registry,
-`secedit.exe`, `auditpol.exe`, `netsh.exe`, `reg.exe`, Defender/NetSecurity/
-BitLocker/LocalAccounts cmdlets) is mocked in the test suite, since none of
-those APIs exist outside Windows. **This has not yet been run against a real
-Windows machine.** Before using it on anything real, run through
-[`docs/MANUAL-VALIDATION.md`](docs/MANUAL-VALIDATION.md) on both a Windows 11
-Home and a Windows 11 Pro/Enterprise device.
+Originally built and tested only on non-Windows dev hardware, with every OS
+interaction (registry, `secedit.exe`, `auditpol.exe`, `netsh.exe`, `reg.exe`,
+Defender/NetSecurity/BitLocker/LocalAccounts cmdlets) mocked in the test
+suite. Since then, `-Mode Audit`, `-Mode Apply`, and `-Mode Restore -Latest`
+have each been run for real on a Windows Pro test VM (see
+[`docs/MANUAL-VALIDATION.md`](docs/MANUAL-VALIDATION.md) Findings for the
+bugs that surfaced and were fixed as a result). **Windows 11 Home has not yet
+been validated**, and BitLocker activation timing on slow/virtual storage is
+still an open question (see the Findings entries). Run through
+`docs/MANUAL-VALIDATION.md` on a Home device, and on any device meaningfully
+different from what's already covered, before relying on this in production.
 
 ## What it covers
 

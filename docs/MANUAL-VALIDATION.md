@@ -180,3 +180,89 @@ reaching `ProtectionStatus = On` — two guesses in a row needed correction
 from real-hardware feedback, so a full diagnostic dump this time (rather
 than another log excerpt) would let the next fix be verified against the
 actual state instead of inferred from an error message alone.
+
+### 2026-07-22 — QEMU Windows test VM, full Audit/Apply/Restore cycle
+
+Ran `-Mode Audit`, `-Mode Apply`, and `-Mode Restore -Latest` for real
+against a fresh VM. The `EncryptionMethod` fix above held up under this
+run — no propagated exception, no "Value does not fall within the
+expected range." Two new real bugs found and fixed, plus one same-session
+over-fix reverted after it broke real usage:
+
+- **`Restore-RemoteAccessSettings` always failed** with
+  `ERROR: Error accessing the registry.` /
+  `reg.exe failed with exit code 1`. `Backup-RemoteAccessSettings` did a
+  full `reg export` of the entire `HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server`
+  key. That tree includes subkeys (`WinStations\RDP-Tcp`, `RCM`, etc.)
+  owned by the actively-running Terminal Services listener service,
+  which `reg import` cannot overwrite while the service holds them open
+  — confirmed by hand: a full-tree `reg import` of the exact backup file
+  failed, while a minimal one-value `.reg` file for just
+  `fDenyTSConnections` imported cleanly. Fixed in
+  `Modules/RemoteAccess.psm1`: backup/restore now round-trips only the
+  single `fDenyTSConnections` value (recording whether it existed at
+  backup time, the same pattern `ScreenLock` already used), instead of
+  exporting/importing the whole key. `Export-RemoteAccessRegistry` /
+  `Import-RemoteAccessRegistry` removed.
+
+- **`Enable-OsDriveBitLocker` could add two redundant recovery password
+  protectors in a single `Apply` run**, on a volume where Windows had
+  already started "Device Encryption" automatically before the toolkit
+  ever ran (`Get-WinEvent -LogName 'Microsoft-Windows-BitLocker/BitLocker Management'`
+  showed `Device Encryption initialized automatically for volume C:`
+  well before the toolkit's own run). `manage-bde -status C:` afterward
+  showed **two** `Numerical Password` protectors, but only the first was
+  ever written to the recovery-key file — the second was silently lost.
+  The BitLocker-API event log showed both protector-creation events
+  succeeded (`A BitLocker key protector was created` /
+  `BitLocker successfully committed metadata changes`), meaning the
+  *first* protector-adding call actually succeeded at the OS level even
+  though the wrapping cmdlet still raised a terminating error (the same
+  class of PowerShell-cmdletization-vs-underlying-WMI-call mismatch as
+  the earlier TPM-protector bug, just on a different code path) — so the
+  existing catch/retry logic blindly added a second one. Fixed in
+  `Modules/BitLocker.psm1`: every fallback branch in
+  `Enable-OsDriveBitLocker` now re-checks the volume's actual key
+  protectors (`Test-OsDriveHasRecoveryPasswordProtector`) before adding
+  another, and skips the add if one is already present. Verified by
+  running `-Mode Apply` twice in a row and confirming via the event log
+  and `KeyProtector` count that no new protector was added on the
+  second run.
+
+  Separately (not yet resolved, not a code bug): on this VM,
+  `ProtectionStatus` stayed `Off` and `Conversion Status` stayed stuck
+  around 93.5-93.6% across multiple `Apply` runs roughly an hour apart,
+  even with a valid recovery password protector in place. This appears
+  to be expected BitLocker behavior (protection only turns on once
+  conversion reaches 100%) combined with a very slow virtual disk, not
+  a defect in this toolkit — the post-apply verification `Warn` is the
+  correct response to it. Re-check `manage-bde -status C:` after giving
+  the VM significantly more time (or on faster storage) to confirm it
+  eventually reaches `ProtectionStatus = On` on its own.
+
+- **Self-inflicted regression, caught and reverted before merging**:
+  partway through this session, the single-item-array-collapsing bug
+  described below was fixed by wrapping every `Common/Orchestrator.psm1`
+  return path in `Write-Output -NoEnumerate`. That fixed the failing
+  Pester assertion (`$results.Count` on a 1-module Restore) but broke
+  real usage — piping `Invoke-SecurityBaseline.ps1`'s output to anything
+  (`| Select-Object ...`, `| Where-Object ...`) started receiving the
+  *entire* result array as one object instead of individual records,
+  confirmed by comparing `$_.GetType().Name` before/after (`PSCustomObject`
+  vs `System.Object[]`). Reverted to plain `return`; the one test that
+  needs guaranteed array semantics on direct assignment now wraps at its
+  own call site with `@(...)` — the standard PowerShell idiom for this —
+  instead of forcing it into the producer. Worth remembering for future
+  changes here: array-count bugs in PowerShell should almost always be
+  fixed at the consuming call site, not by changing how the producer
+  writes to the pipeline.
+
+  Also fixed, found via the mocked Pester suite rather than real
+  hardware: `New-BaselineAuditReport` wrote `"[\r\n\r\n]"` instead of
+  `"[]"` for an empty result set (`ConvertTo-Json`'s default formatting
+  of an empty array), and every `Invoke-*Run` function in
+  `Common/Orchestrator.psm1` silently returned `$null` instead of an
+  empty/single-element array when crossing a function-call boundary —
+  standard PowerShell pipeline-enumeration behavior, not specific to
+  this codebase, but worth knowing about before writing more code here
+  that assumes `.Count` works uniformly regardless of result size.
