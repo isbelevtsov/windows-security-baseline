@@ -104,7 +104,31 @@ function Restore-PasswordPolicySettings {
     if (-not (Test-Path -Path $cfgPath)) {
         throw "No password policy backup found at '$cfgPath'."
     }
-    Invoke-SecEditConfigure -CfgPath $cfgPath
+
+    # Restoring by /configuring the raw backup file directly would also
+    # reassert whatever else was in its [System Access] section at backup
+    # time - and since secedit exports that whole shared section,
+    # AccountLockout's own backup (taken later in the same Apply run,
+    # after this module's Set already committed) silently captures
+    # PasswordPolicy's already-applied values instead of the true
+    # pre-Apply ones. Restoring PasswordPolicy from its own snapshot would
+    # then be immediately clobbered back to those stale values when
+    # AccountLockout's restore ran its own full /configure right
+    # afterward - confirmed on real hardware. Instead, only this module's
+    # own keys are copied out of the backup into a freshly-exported
+    # CURRENT working cfg, leaving every other setting - including
+    # AccountLockout's - exactly as it currently stands.
+    $workingCfgPath = Join-Path -Path $BackupPath -ChildPath 'password-policy-restore-working.cfg'
+    Invoke-SecEditExport -CfgPath $workingCfgPath
+
+    foreach ($seceditKey in $script:SeceditKeyMap.Values) {
+        $backedUpValue = Get-SecurityPolicyValue -CfgPath $cfgPath -Key $seceditKey
+        if ($null -ne $backedUpValue) {
+            Set-SecurityPolicyValue -CfgPath $workingCfgPath -Key $seceditKey -Value $backedUpValue
+        }
+    }
+
+    Invoke-SecEditConfigure -CfgPath $workingCfgPath
 }
 
 Export-ModuleMember -Function Test-PasswordPolicyBaseline, Backup-PasswordPolicySettings, Set-PasswordPolicyBaseline, Restore-PasswordPolicySettings

@@ -299,6 +299,7 @@ Describe 'Restore-BitLockerSettings' {
 
     It 'decrypts when -DecryptOnRestore is passed and the backup shows protection was Off' {
         Mock -ModuleName BitLocker -CommandName Disable-OsDriveBitLocker { }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ VolumeStatus = 'FullyEncrypted' } }
         $backupPath = Join-Path $TestDrive 'BitLockerBackupDecrypt'
         New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
         Set-Content -Path (Join-Path $backupPath 'bitlocker-state.json') -Value (@{ ProtectionStatus = 'Off' } | ConvertTo-Json)
@@ -307,5 +308,23 @@ Describe 'Restore-BitLockerSettings' {
 
         $result.Restored | Should -BeTrue
         Should -Invoke -ModuleName BitLocker -CommandName Disable-OsDriveBitLocker -Times 1
+    }
+
+    It 'does not call Disable-BitLocker again when the volume is already decrypting' {
+        # Regression test for a real error on Windows hardware: calling
+        # Disable-BitLocker on a volume that's already decrypting (e.g.
+        # from an earlier -DecryptOnRestore run) throws "BitLocker Drive
+        # Encryption is not enabled on this drive" - harmless in effect,
+        # but a needless scary error on a repeated restore.
+        Mock -ModuleName BitLocker -CommandName Disable-OsDriveBitLocker { }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ VolumeStatus = 'DecryptionInProgress' } }
+        $backupPath = Join-Path $TestDrive 'BitLockerBackupAlreadyDecrypting'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $backupPath 'bitlocker-state.json') -Value (@{ ProtectionStatus = 'Off' } | ConvertTo-Json)
+
+        $result = Restore-BitLockerSettings -BackupPath $backupPath -DecryptOnRestore
+
+        $result.Restored | Should -BeTrue
+        Should -Invoke -ModuleName BitLocker -CommandName Disable-OsDriveBitLocker -Times 0
     }
 }

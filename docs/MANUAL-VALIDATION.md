@@ -513,3 +513,62 @@ time in this project's real-hardware validation history that BitLocker
 has reported fully compliant - and a follow-up `-Mode Apply` shows
 `0 setting(s) changed`, confirming it stays compliant and idempotent
 rather than needlessly re-attempting protector setup on every run.
+
+### 2026-07-23 — same VM, restoring to a fresh-like state for a clean re-test: two more real bugs
+
+Asked to restore every setting back toward the VM's original state (from
+the earliest snapshot, before any Apply this project ever ran) to set up
+for another clean full-suite test pass. This surfaced two more real bugs.
+
+**Restoring PasswordPolicy and AccountLockout together silently clobbered
+PasswordPolicy back to its already-applied (compliant) values.**
+`PasswordPolicy` and `AccountLockout` share the same secedit
+`[System Access]` section. `Backup-<Area>Settings` for both simply calls
+`secedit /export`, which dumps the *entire* section - not just the keys
+that module manages. Because `Invoke-ApplyRun` processes modules
+sequentially (`PasswordPolicy` before `AccountLockout`), `AccountLockout`'s
+own backup - taken *after* `PasswordPolicy`'s `Set` already committed in
+that same `Apply` run - silently captured `PasswordPolicy`'s post-`Set`
+values instead of the true pre-`Apply` ones. Confirmed directly:
+`PasswordPolicy\password-policy.cfg` showed `MinimumPasswordLength = 0`
+(the true original), while `AccountLockout\account-lockout.cfg` from the
+exact same snapshot showed `MinimumPasswordLength = 14`
+(`PasswordPolicy`'s already-applied value, baked in by accident). Restoring
+both from that snapshot together then reverted `AccountLockout` correctly
+but immediately re-asserted `PasswordPolicy`'s stale compliant values the
+moment `AccountLockout`'s own `/configure` ran afterward - reproduced and
+confirmed via `Get-Content ... | Select-String` on both cfg files, and via
+`Invoke-SecurityBaseline.ps1 -Mode Audit` before/after each restore step.
+
+Fixed in `Modules/PasswordPolicy.psm1` and `Modules/AccountLockout.psm1`:
+`Restore-<Area>Settings` no longer `/configure`s the raw historical backup
+file directly. It now exports the **current** live policy fresh, copies
+only that module's own keys out of the backup into that fresh export
+(the same `Get-`/`Set-SecurityPolicyValue` pattern `Test-`/`Set-<Area>Baseline`
+already use), and configures from that patched-current export instead -
+leaving every other setting, including whatever the other secedit-based
+module currently has, untouched. Verified for real: reproduced the exact
+failing scenario (restore `PasswordPolicy`+`AccountLockout` together) both
+before and after the fix - before, `PasswordPolicy` stayed compliant after
+restore; after, both correctly revert to their true original values.
+
+**Restoring BitLocker a second time with `-DecryptOnRestore` threw
+"BitLocker Drive Encryption is not enabled on this drive."** Harmless in
+effect (decryption was already under way from an earlier restore), but a
+needless scary error on a repeat run. Fixed in `Modules/BitLocker.psm1`:
+`Restore-BitLockerSettings` now checks `VolumeStatus` first and skips the
+`Disable-BitLocker` call entirely if the volume is already
+`DecryptionInProgress` or `FullyDecrypted`.
+
+Verified for real, full-suite: restored every module from the earliest
+snapshot (`Get-ItemProperty`/`Get-LocalUser`/`manage-bde` checked
+directly, not just re-running `Audit`) - `PasswordPolicy`, `AccountLockout`,
+`AuditPolicy`, `Firewall`, `ScreenLock`, and `RemoteAccess` (including
+`DisableRDP` correctly reverting to `False`, confirming RDP really was
+enabled before this project's very first `Apply`) all reverted to their
+true pre-`Apply` values, and `manage-bde -status C:` reached
+`Conversion Status: Fully Decrypted`, `Percentage Encrypted: 0.0%`.
+`LocalAccounts` intentionally stayed hardened (`PasswordRequired`,
+`PasswordNeverExpires` both still compliant) - by design, restoring a
+blank password is a security regression this toolkit refuses to perform,
+documented in that module's own Restore function.

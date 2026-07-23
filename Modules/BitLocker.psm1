@@ -259,7 +259,14 @@ function Restore-BitLockerSettings {
     }
     $saved = Get-Content -Path $statePath -Raw | ConvertFrom-Json
 
-    if ($saved.ProtectionStatus -ne 'On') {
+    # Confirmed on real hardware: calling Disable-BitLocker on a volume
+    # that's already decrypting (or already fully decrypted) throws
+    # "BitLocker Drive Encryption is not enabled on this drive" - harmless
+    # in effect (decryption was already under way from an earlier Restore
+    # -DecryptOnRestore), but a needless scary-looking error on a repeat
+    # run. Skip the call entirely if there's nothing left to disable.
+    $alreadyDecrypting = "$((Get-OsDriveBitLockerVolume).VolumeStatus)" -in @('DecryptionInProgress', 'FullyDecrypted')
+    if ($saved.ProtectionStatus -ne 'On' -and -not $alreadyDecrypting) {
         Disable-OsDriveBitLocker
     }
 
