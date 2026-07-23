@@ -10,7 +10,12 @@ function New-BaselineAuditReport {
         New-Item -Path $reportDir -ItemType Directory -Force | Out-Null
     }
 
-    ConvertTo-Json -InputObject $Results -Depth 5 | Set-Content -Path $ReportPath
+    if ($Results.Count -eq 0) {
+        Set-Content -Path $ReportPath -Value '[]'
+    }
+    else {
+        ConvertTo-Json -InputObject $Results -Depth 5 | Set-Content -Path $ReportPath
+    }
 
     $passed = @($Results | Where-Object { $_.Pass }).Count
     $failed = @($Results | Where-Object { -not $_.Pass }).Count
