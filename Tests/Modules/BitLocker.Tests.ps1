@@ -1,5 +1,25 @@
 # Tests/Modules/BitLocker.Tests.ps1
 BeforeAll {
+    # Stand-in stub, same pattern Tests/Common/Orchestrator.Tests.ps1 uses
+    # for the per-area functions it mocks. Without it, mocking the real
+    # Enable-BitLocker cmdlet below forces PowerShell's command-auto-load
+    # to import the actual Windows "BitLocker" module to resolve it - which
+    # happens to share the exact same name as this project's own
+    # Modules/BitLocker.psm1, so Pester then finds two distinct modules
+    # both named "BitLocker" and refuses to pick one for InModuleScope.
+    # Pre-defining the stub means the command already resolves without
+    # ever needing to auto-load the real module.
+    function global:Enable-BitLocker {
+        param(
+            [string]$MountPoint,
+            [string]$EncryptionMethod,
+            [switch]$TpmProtector,
+            [switch]$RecoveryPasswordProtector,
+            [switch]$SkipHardwareTest,
+            [switch]$UsedSpaceOnly
+        )
+    }
+
     Import-Module "$PSScriptRoot/../../Modules/BitLocker.psm1" -Force
 
     # Set SystemDrive for cross-platform testing
@@ -9,6 +29,31 @@ BeforeAll {
         @{
             EncryptionMethod = @{ Value = 'XtsAes256'; Description = 'method' }
             RecoveryKeyPath  = @{ Value = (Join-Path $TestDrive 'RecoveryKeys'); Description = 'key path' }
+        }
+    }
+}
+
+Describe 'Invoke-EnableBitLockerWith* wrapper functions' {
+    It 'passes -UsedSpaceOnly on every Enable-BitLocker call' {
+        # Regression test for a real failure on Windows hardware (a QEMU
+        # VM's thin-provisioned virtual disk): Enable-BitLocker defaults to
+        # full-volume encryption unless -UsedSpaceOnly is passed, which
+        # thin-provisioned storage rejects outright with "BitLocker Drive
+        # Encryption only supports Used Space Only encryption on thin
+        # provisioned storage" (HRESULT 0x803100A5). This went unnoticed
+        # for a long time because Windows' own automatic Device Encryption
+        # had already started the volume as Used Space Only before this
+        # module ever needed to decide - it only surfaced once the volume
+        # was fully decrypted and Enable-BitLocker had to start completely
+        # fresh.
+        InModuleScope -ModuleName BitLocker {
+            Mock -CommandName Enable-BitLocker { }
+
+            Invoke-EnableBitLockerWithTpmProtector -EncryptionMethod 'XtsAes256'
+            Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod 'XtsAes256'
+            Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly
+
+            Should -Invoke -CommandName Enable-BitLocker -Times 3 -ParameterFilter { $UsedSpaceOnly -eq $true }
         }
     }
 }

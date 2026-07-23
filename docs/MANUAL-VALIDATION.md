@@ -572,3 +572,56 @@ true pre-`Apply` values, and `manage-bde -status C:` reached
 `PasswordNeverExpires` both still compliant) - by design, restoring a
 blank password is a security regression this toolkit refuses to perform,
 documented in that module's own Restore function.
+
+### 2026-07-23 — same VM, fourth BitLocker follow-up: thin-provisioned storage rejects full-volume encryption
+
+Immediately after the fresh-state restore above (BitLocker now genuinely
+`Fully Decrypted`, `0%`), running `-Mode Apply` again threw a brand new
+real error that had never surfaced before:
+
+```
+Write-BaselineLog : Apply of module 'BitLocker' failed, skipping:
+BitLocker Drive Encryption only supports Used Space Only encryption on
+thin provisioned storage. (Exception from HRESULT: 0x803100A5)
+```
+
+Root cause: none of this module's `Enable-BitLocker` calls ever passed
+`-UsedSpaceOnly`, so without it, `Enable-BitLocker` defaults to
+full-volume encryption. This had never been hit before because every
+prior real-hardware test session found Windows' own automatic
+"Device Encryption" had *already* started the volume as Used Space Only
+before this toolkit ever ran (see the very first BitLocker findings entry
+in this log) - so this module's own `Enable-BitLocker` calls only ever
+needed to add protectors to conversion already locked into that method,
+never to decide the method itself. Fully decrypting the volume (the
+restore above) reset that entirely, and the very next `Enable-BitLocker`
+call had to choose a method fresh - defaulting to full-volume, which this
+VM's thin-provisioned virtual disk (`Get-PhysicalDisk` shows
+`QEMU QEMU HARDDISK`) rejects outright.
+
+Fixed in `Modules/BitLocker.psm1`: all three `Invoke-EnableBitLockerWith*`
+functions now pass `-UsedSpaceOnly` (matching what Device Encryption
+already defaults to, and required on any thin-provisioned storage -
+common for VMs generally, not just this one).
+
+While fixing this, adding a regression test surfaced an unrelated,
+pre-existing test-infrastructure issue worth knowing about for future
+BitLocker test changes: this project's own module is named `BitLocker`,
+identical to the real Windows `BitLocker` PowerShell module. Mocking a
+real cmdlet name this module doesn't itself define (`Enable-BitLocker`)
+forces PowerShell's command auto-load to import the *actual* Windows
+module to resolve it, and Pester then finds two distinct modules both
+named `BitLocker` and refuses to pick one for `InModuleScope`. Fixed by
+pre-defining a stub `Enable-BitLocker` function before the module import
+- with the relevant parameters declared in its own `param()` block, since
+without them `-ParameterFilter` in a `Should -Invoke` assertion has no
+bound variables to match against and silently never matches anything -
+the same stand-in-stub pattern `Tests/Common/Orchestrator.Tests.ps1`
+already uses for the
+per-area functions it mocks.
+
+Verified for real: re-ran `-Mode Apply -Modules BitLocker` after the fix
+- no error this time, `manage-bde -status C:` showed
+`Conversion Status: Encryption in Progress`, `53.8%`, a real `Tpm`
+protector successfully added (no TPM-fallback note this time), using
+`XTS-AES 256` as configured.

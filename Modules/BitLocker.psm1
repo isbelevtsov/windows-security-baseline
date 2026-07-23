@@ -9,13 +9,21 @@ function Get-OsDriveBitLockerVolume {
 function Invoke-EnableBitLockerWithTpmProtector {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$EncryptionMethod)
-    Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -TpmProtector -SkipHardwareTest -ErrorAction Stop
+    # -UsedSpaceOnly is required on thin-provisioned storage (confirmed on
+    # real hardware: a QEMU virtual disk here) - without it, Enable-BitLocker
+    # defaults to full-volume encryption, which throws "BitLocker Drive
+    # Encryption only supports Used Space Only encryption on thin
+    # provisioned storage" (HRESULT 0x803100A5). Windows' own automatic
+    # Device Encryption already defaults to Used Space Only, which is why
+    # this was never hit until the volume was fully decrypted and this
+    # module had to enable it completely fresh.
+    Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -TpmProtector -SkipHardwareTest -UsedSpaceOnly -ErrorAction Stop
 }
 
 function Invoke-EnableBitLockerWithRecoveryPasswordProtector {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$EncryptionMethod)
-    Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -RecoveryPasswordProtector -SkipHardwareTest -ErrorAction Stop
+    Enable-BitLocker -MountPoint $env:SystemDrive -EncryptionMethod $EncryptionMethod -RecoveryPasswordProtector -SkipHardwareTest -UsedSpaceOnly -ErrorAction Stop
 }
 
 function Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly {
@@ -28,7 +36,7 @@ function Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly {
     # expected range." - a generic enum-validation message from the underlying
     # cmdletization layer. Omitting it lets Windows use whatever is already
     # configured (or its platform default, XtsAes256 on modern Windows).
-    Enable-BitLocker -MountPoint $env:SystemDrive -RecoveryPasswordProtector -SkipHardwareTest -ErrorAction Stop
+    Enable-BitLocker -MountPoint $env:SystemDrive -RecoveryPasswordProtector -SkipHardwareTest -UsedSpaceOnly -ErrorAction Stop
 }
 
 function Add-OsDriveRecoveryPasswordProtector {
