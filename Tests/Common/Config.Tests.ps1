@@ -26,6 +26,7 @@ Describe 'Import-BaselineConfig' {
     AuditPolicy    = @{}
     RemoteAccess   = @{}
     BitLocker      = @{}
+    LocalAccounts  = @{}
 }
 '@
         $config = Import-BaselineConfig -Path $path
@@ -36,6 +37,7 @@ Describe 'Import-BaselineConfig' {
         $config = Import-BaselineConfig -Path "$PSScriptRoot/../../Config/Baseline.config.psd1"
         $config.PasswordPolicy.MinimumPasswordLength.Value | Should -Be 14
         $config.RemoteAccess.DisableRDP.Value | Should -Be $true
+        $config.LocalAccounts.DisableAutoLogon.Value | Should -Be $true
     }
 }
 

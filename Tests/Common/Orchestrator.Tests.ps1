@@ -43,6 +43,11 @@ BeforeAll {
     function global:Backup-BitLockerSettings { }
     function global:Set-BitLockerBaseline { @() }
     function global:Restore-BitLockerSettings { param([string]$BackupPath, [switch]$DecryptOnRestore) }
+
+    function global:Test-LocalAccountsBaseline { @() }
+    function global:Backup-LocalAccountsSettings { }
+    function global:Set-LocalAccountsBaseline { @() }
+    function global:Restore-LocalAccountsSettings { }
 }
 
 Describe 'Invoke-BaselineRun elevation check' {
@@ -61,7 +66,7 @@ Describe 'Invoke-BaselineRun -Mode Audit' {
         Mock -ModuleName Orchestrator -CommandName Import-BaselineConfig {
             @{
                 PasswordPolicy = @{}; AccountLockout = @{}; Defender = @{}; Firewall = @{}
-                ScreenLock = @{}; AuditPolicy = @{}; RemoteAccess = @{}; BitLocker = @{}
+                ScreenLock = @{}; AuditPolicy = @{}; RemoteAccess = @{}; BitLocker = @{}; LocalAccounts = @{}
             }
         }
     }
@@ -100,7 +105,7 @@ Describe 'Invoke-BaselineRun -Mode Apply' {
         Mock -ModuleName Orchestrator -CommandName Import-BaselineConfig {
             @{
                 PasswordPolicy = @{}; AccountLockout = @{}; Defender = @{}; Firewall = @{}
-                ScreenLock = @{}; AuditPolicy = @{}; RemoteAccess = @{}; BitLocker = @{}
+                ScreenLock = @{}; AuditPolicy = @{}; RemoteAccess = @{}; BitLocker = @{}; LocalAccounts = @{}
             }
         }
     }

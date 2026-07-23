@@ -3,8 +3,8 @@
 param(
     [Parameter(Mandatory)][ValidateSet('Audit', 'Apply', 'Restore')][string]$Mode,
 
-    [ValidateSet('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker')]
-    [string[]]$Modules = @('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker'),
+    [ValidateSet('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts')]
+    [string[]]$Modules = @('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts'),
 
     [string]$RootPath = 'C:\ProgramData\SecurityBaseline',
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'Config\Baseline.config.psd1'),
@@ -30,6 +30,7 @@ $moduleFiles = @(
     'Modules\AuditPolicy.psm1'
     'Modules\RemoteAccess.psm1'
     'Modules\BitLocker.psm1'
+    'Modules\LocalAccounts.psm1'
 )
 
 foreach ($file in $moduleFiles) {

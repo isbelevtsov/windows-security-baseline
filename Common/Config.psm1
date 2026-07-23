@@ -1,6 +1,6 @@
 $script:RequiredSections = @(
     'PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall',
-    'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker'
+    'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts'
 )
 
 function Import-BaselineConfig {

@@ -5,7 +5,7 @@ Import-Module (Join-Path $PSScriptRoot 'BackupRestore.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Reporting.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Logging.psm1') -Force
 
-$script:AllModules = @('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker')
+$script:AllModules = @('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts')
 
 $script:ModuleFunctionMap = @{
     PasswordPolicy = @{ Test = 'Test-PasswordPolicyBaseline'; Backup = 'Backup-PasswordPolicySettings'; Set = 'Set-PasswordPolicyBaseline'; Restore = 'Restore-PasswordPolicySettings' }
@@ -16,6 +16,7 @@ $script:ModuleFunctionMap = @{
     AuditPolicy    = @{ Test = 'Test-AuditPolicyBaseline';    Backup = 'Backup-AuditPolicySettings';    Set = 'Set-AuditPolicyBaseline';    Restore = 'Restore-AuditPolicySettings' }
     RemoteAccess   = @{ Test = 'Test-RemoteAccessBaseline';   Backup = 'Backup-RemoteAccessSettings';   Set = 'Set-RemoteAccessBaseline';   Restore = 'Restore-RemoteAccessSettings' }
     BitLocker      = @{ Test = 'Test-BitLockerBaseline';      Backup = 'Backup-BitLockerSettings';      Set = 'Set-BitLockerBaseline';      Restore = 'Restore-BitLockerSettings' }
+    LocalAccounts  = @{ Test = 'Test-LocalAccountsBaseline';  Backup = 'Backup-LocalAccountsSettings';  Set = 'Set-LocalAccountsBaseline';  Restore = 'Restore-LocalAccountsSettings' }
 }
 
 $script:SeceditModules = @('PasswordPolicy', 'AccountLockout')

@@ -108,4 +108,14 @@
             Description = "Local folder where the BitLocker recovery key is saved, since standalone/workgroup devices have no AD/Entra to escrow it to. Secure or relocate this folder's contents as a manual follow-up."
         }
     }
+    LocalAccounts = @{
+        DisableAutoLogon = @{
+            Value       = $true
+            Description = "Disables Windows automatic sign-in (AutoAdminLogon). Autologon stores the account's password in plaintext in the registry (Winlogon\DefaultPassword) and skips the logon prompt/screen lock entirely, both of which defeat the other controls in this baseline."
+        }
+        RequirePasswordForAllAccounts = @{
+            Value       = $true
+            Description = "Ensures every enabled local account requires a password, rejecting the 'password not required' flag that allows a blank password. There is no way to query whether an account's current password is literally blank, so any account found without this is also forced to change its password at next logon - the only way to guarantee a real, policy-compliant password gets set."
+        }
+    }
 }

@@ -46,6 +46,13 @@ BitLocker for real.
       reverts — `fDenyTSConnections` is `1`.
 - [ ] `Get-SmbServerConfiguration | Select EnableSMB1Protocol` is `False`.
 - [ ] `Get-LocalUser -Name Guest` shows `Enabled = False`.
+- [ ] Local accounts: `Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'` shows
+      `AutoAdminLogon = 0` and no `DefaultPassword` value. Any enabled local account that
+      previously showed `PasswordRequired = False` in `Get-LocalUser` is forced to change
+      its password at next interactive logon — confirm by actually logging that account
+      out and back in (or switching user) and observing the "you must change your
+      password" prompt. `PasswordRequired` itself only flips to `True` on a *later* Apply
+      run, after that password has actually been changed to something policy-compliant.
 - [ ] BitLocker: `Get-BitLockerVolume` shows `ProtectionStatus = On` for the OS drive
       (Pro/Enterprise) **or** the audit report notes it as unavailable rather than
       crashing (Home, if Device Encryption prerequisites like a TPM aren't present in
@@ -266,3 +273,74 @@ over-fix reverted after it broke real usage:
   standard PowerShell pipeline-enumeration behavior, not specific to
   this codebase, but worth knowing about before writing more code here
   that assumes `.Count` works uniformly regardless of result size.
+
+### 2026-07-22 — same VM, adding the LocalAccounts module (autologon + blank passwords)
+
+Added a ninth module, `Modules/LocalAccounts.psm1`, covering two gaps not
+previously in scope: Windows autologon (`AutoAdminLogon`, which stores a
+plaintext password in the registry and skips the logon prompt/screen lock
+entirely) and local accounts that allow a blank password
+(`Get-LocalUser`'s `PasswordRequired = $false`). Tested against this VM's
+real `user` account, which had exactly that: enabled, `PasswordRequired =
+False`. Three real bugs found and fixed while doing so, none visible from
+the mocked Pester suite alone:
+
+- **`Set-LocalUser` has no `-PasswordRequired` parameter at all.**
+  `Get-Command Set-LocalUser -Syntax` on this build confirms it only
+  supports `-AccountExpires`, `-AccountNeverExpires`, `-Description`,
+  `-FullName`, `-Password`, `-PasswordNeverExpires`, and
+  `-UserMayChangePassword` — a long-standing gap in the built-in
+  `Microsoft.PowerShell.LocalAccounts` module (`PasswordRequired` is
+  exposed as a read-only property on `Get-LocalUser`'s output, with no
+  corresponding setter anywhere in the module). Fixed by using the WinNT
+  ADSI provider instead (`([ADSI]"WinNT://$env:COMPUTERNAME/$Name,user").PasswordRequired
+  = $true`), the same mechanism already used for forcing a password
+  change at next logon.
+
+- **That ADSI call throws "The password does not meet the password
+  policy requirements"** when the account's *current* password doesn't
+  satisfy the active complexity/length policy — confirmed directly
+  against the real `user` account, which is exactly the situation this
+  feature exists to fix (a blank or otherwise non-compliant existing
+  password). So `Set-LocalUserRequiresPassword` can legitimately fail on
+  the very account it's meant to remediate, on the very first Apply run.
+  Fixed by reordering: `Set-LocalUserPasswordExpired` (forces a change at
+  next logon) runs first and has no such precondition, so it always
+  succeeds; `Set-LocalUserRequiresPassword` is now best-effort, wrapped
+  in its own try/catch, with `Set-LocalAccountsBaseline` reporting
+  `Changed=True`/`After=False` and a Note explaining it'll succeed
+  automatically on a later Apply run once the account's password has
+  actually been changed to something compliant.
+
+- **`[ADSI]::SetInfo()` leaked a stray `$null` onto the pipeline**,
+  silently prepending it to `Set-LocalAccountsBaseline`'s returned array.
+  `SetInfo()` is a COM method call through the ADSI interop layer, and an
+  unsuppressed call to it (or to any function whose last statement calls
+  it) writes `$null` to the output stream as an interop artifact — this
+  isn't specific to this codebase, but it's an easy thing to miss since
+  the function *looks* like it returns nothing. Confirmed directly:
+  calling `Set-LocalAccountsBaseline` and inspecting each array element
+  individually showed index 0 was `$null`, indices 1-2 were the real
+  `PSCustomObject` results. This in turn caused a *second*, harder-to-
+  diagnose failure further up the call chain: `Invoke-ApplyRun`'s
+  `Write-BaselineApplySummary -ChangeRecords @($allChanges) ...` threw
+  `ParameterBindingValidationException` even though `@($allChanges).Count
+  -gt 0` had just evaluated true moments earlier in the preceding `if` —
+  the count check passed because the array had 3 elements (including the
+  null), but something about that specific mix apparently still tripped
+  the mandatory-parameter null check on the actual call. Fixed by piping
+  every ADSI `SetInfo()` call to `Out-Null` at its source, inside
+  `Set-LocalUserRequiresPassword` and `Set-LocalUserPasswordExpired`
+  themselves (not just at each call site), so every caller — including
+  `Restore-LocalAccountsSettings` — is protected.
+
+Verified end-to-end after all three fixes: real `Apply` forced the `user`
+account's password-expired flag (confirmed via `net user user` and the
+`Microsoft-Windows-Security` mechanics, though not by an actual interactive
+logon in this session — see the Apply-mode checklist above for that step),
+correctly reported `PasswordRequired` as still-pending with a clear Note,
+re-running `Apply` immediately after was idempotent (no crash, consistent
+Note, no duplicate side effects), and `Restore` correctly reverted the
+autologon registry values while leaving `PasswordRequired` alone (per the
+module's intentionally one-way security posture) and never touching
+`DefaultPassword`.
