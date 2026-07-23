@@ -121,5 +121,9 @@
             Value       = 'C:\ProgramData\SecurityBaseline\TemporaryPasswords'
             Description = "Local folder where a generated temporary password is saved in plaintext when RequirePasswordForAllAccounts remediates a blank-password account, since the account holder needs it to log on once before setting their own. Secure, relocate, or delete each file after that happens."
         }
+        DisablePasswordNeverExpires = @{
+            Value       = $true
+            Description = "Clears the 'Password never expires' flag on every enabled local account. Confirmed on real hardware: an account with this flag set silently defeats any forced 'must change password at next logon' action on that same account - Windows lets the logon through and clears the must-change flag without ever prompting - so it has to be checked and cleared independently of whatever else is being remediated on the account."
+        }
     }
 }

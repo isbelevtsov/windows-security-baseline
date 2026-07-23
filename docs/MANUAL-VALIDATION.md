@@ -52,12 +52,15 @@ BitLocker for real.
       `PasswordRequired = True` (`net user <name>` shows `Password required   Yes`)
       immediately after a single Apply run, and a temporary password file exists at
       `C:\ProgramData\SecurityBaseline\TemporaryPasswords\<name>-temp-password.txt`.
-      Confirm the forced change actually works by logging that account out and back in
-      (or switching user) using the password from that file, and observing the "you
-      must change your password" prompt — this is the step most worth re-checking after
-      any change here, since an earlier version of this fix looked correct from the
-      registry/cmdlet state alone but didn't actually prompt at the logon screen for a
-      genuinely blank-password account.
+      Also check `([ADSI]"WinNT://$env:COMPUTERNAME/<name>,user").UserFlags.Value` (as a
+      hex value) does **not** include `0x10000` (`UF_DONT_EXPIRE_PASSWD` / "Password
+      never expires") - neither `Get-LocalUser` nor `net user` surfaces this flag, but it
+      silently defeats the forced password change if set. Confirm the forced change
+      actually works by logging that account out and back in (or switching user) using
+      the password from that file, and observing the "you must change your password"
+      prompt — this is the step most worth re-checking after any change here, since two
+      earlier versions of this fix each looked correct from the registry/cmdlet state
+      alone but didn't actually prompt at the logon screen for this exact account.
 - [ ] BitLocker: `Get-BitLockerVolume` shows `ProtectionStatus = On` for the OS drive
       (Pro/Enterprise) **or** the audit report notes it as unavailable rather than
       crashing (Home, if Device Encryption prerequisites like a TPM aren't present in
@@ -410,3 +413,54 @@ shows the module fully compliant. **Still not confirmed by an actual
 interactive logon in this session** — re-run the Apply-mode checklist
 item above (log the account out and back in using the temporary password)
 and update this entry if the change-password prompt still doesn't appear.
+
+### 2026-07-23 — same VM, second follow-up: "Password never expires" silently defeated the forced change
+
+Real-world feedback again: logged out, logged back in with the temporary
+password from the file above, and Windows still did not prompt to change
+it.
+
+Root cause, confirmed by reading the account's raw `UserFlags` bitmask
+directly via ADSI (`([ADSI]"WinNT://$env:COMPUTERNAME/user,user").UserFlags`):
+it was `0x10201`, which includes `UF_DONT_EXPIRE_PASSWD` (`0x10000`) -
+i.e. "Password never expires" was set on this account (not something this
+baseline had set; it was already there). After the logon that used the
+temporary password, `PasswordExpired` read back as `0` and a matching
+Security event 4624 (`LogonType 2`, account `user`) was sitting right at
+that timestamp - Windows accepted the logon and silently cleared the
+must-change flag without ever prompting, because "Password never expires"
+and "must change at next logon" conflict, and the former wins. This is a
+known Windows quirk, not specific to this codebase, but easy to miss
+since neither `Get-LocalUser` nor `net user` surfaces "Password never
+expires" as a queryable property or line - only the raw `UserFlags` (or
+`lusrmgr.msc`) shows it.
+
+Fixed in `Modules/LocalAccounts.psm1`: `PasswordNeverExpires` is now a
+first-class, independently-audited per-account setting (`<user>.PasswordNeverExpires`,
+new `DisablePasswordNeverExpires` config value), checked and remediated
+on its own rather than only as a side effect of fixing `PasswordRequired`
+- this matters because an account can already be `PasswordRequired=True`
+from a prior `Apply` run (as this one was) while still having "Password
+never expires" set, in which case the old code's `PasswordRequired`
+remediation branch would never run again and the flag would never get
+cleared. `Get-LocalUserPasswordNeverExpires` reads the raw `UserFlags`
+bit directly since there's no cmdlet property for it;
+`Clear-LocalUserPasswordNeverExpires` uses `Set-LocalUser -PasswordNeverExpires $false`
+(which does exist as a parameter, confirmed via `Get-Command -Syntax`).
+Clearing it alone isn't enough either - `Set-LocalUserPasswordExpired` is
+re-called in the same remediation, since the earlier logon already
+consumed the flag once.
+
+Verified for real: raw `UserFlags` went from `0x10201` to `0x800201`
+(`UF_DONT_EXPIRE_PASSWD` gone, `UF_PASSWORD_EXPIRED` now present),
+`PasswordExpired` reads `1`, a follow-up `Apply` is idempotent
+(`0 setting(s) changed`), and `Audit` shows all three settings
+(`AutoLogonDisabled`, `PasswordRequired`, `PasswordNeverExpires`)
+compliant. **Still not confirmed by an actual interactive logon** - this
+is now the second time a fix that looked complete from cmdlet/registry
+state didn't hold up against a real logon attempt, so treat this one the
+same way: log the account out and back in with the same temporary
+password and confirm the change prompt actually appears before trusting
+this is done. If it still doesn't prompt, capture the account's raw
+`UserFlags` value and the nearest Security event 4624 right after that
+attempt, the same way this entry did.

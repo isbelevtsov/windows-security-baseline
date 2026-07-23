@@ -7,6 +7,7 @@ BeforeAll {
             DisableAutoLogon              = @{ Value = $true; Description = 'autologon' }
             RequirePasswordForAllAccounts = @{ Value = $true; Description = 'password required' }
             TemporaryPasswordPath         = @{ Value = (Join-Path $TestDrive 'TemporaryPasswords'); Description = 'temp password path' }
+            DisablePasswordNeverExpires   = @{ Value = $true; Description = 'password never expires' }
         }
     }
 }
@@ -55,6 +56,7 @@ Describe 'Test-LocalAccountsBaseline' {
         Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
             @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $false })
         }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $false }
 
         $results = Test-LocalAccountsBaseline -Config (New-TestConfig)
 
@@ -66,10 +68,42 @@ Describe 'Test-LocalAccountsBaseline' {
         Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
             @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
         }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $false }
 
         $results = Test-LocalAccountsBaseline -Config (New-TestConfig)
 
         ($results | Where-Object Setting -eq 'alice.PasswordRequired').Pass | Should -BeTrue
+    }
+
+    It 'flags an enabled account that has "password never expires" set' {
+        # Regression test for a real failure on Windows hardware: an
+        # account can already be PasswordRequired=True (e.g. from a prior
+        # Apply run) while still having "Password never expires" set from
+        # before this baseline ever touched it - and that combination
+        # silently defeats any future forced password change on that
+        # account, so it must be checked independently rather than only
+        # as a side effect of remediating PasswordRequired.
+        Mock -ModuleName LocalAccounts -CommandName Get-AutoLogonEnabled { $false }
+        Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
+            @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
+        }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $true }
+
+        $results = Test-LocalAccountsBaseline -Config (New-TestConfig)
+
+        ($results | Where-Object Setting -eq 'alice.PasswordNeverExpires').Pass | Should -BeFalse
+    }
+
+    It 'passes for an enabled account without "password never expires" set' {
+        Mock -ModuleName LocalAccounts -CommandName Get-AutoLogonEnabled { $false }
+        Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
+            @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
+        }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $false }
+
+        $results = Test-LocalAccountsBaseline -Config (New-TestConfig)
+
+        ($results | Where-Object Setting -eq 'alice.PasswordNeverExpires').Pass | Should -BeTrue
     }
 }
 
@@ -122,6 +156,7 @@ Describe 'Set-LocalAccountsBaseline' {
         Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
             @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $false })
         }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $false }
         Mock -ModuleName LocalAccounts -CommandName New-CompliantTemporaryPassword { 'Tmp-Passw0rd!12345678' }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserTemporaryPassword { }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserRequiresPassword { }
@@ -156,6 +191,7 @@ Describe 'Set-LocalAccountsBaseline' {
         Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
             @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $false })
         }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $false }
         Mock -ModuleName LocalAccounts -CommandName New-CompliantTemporaryPassword { 'Tmp-Passw0rd!12345678' }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserTemporaryPassword { }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserRequiresPassword { throw 'The password does not meet the password policy requirements.' }
@@ -177,6 +213,7 @@ Describe 'Set-LocalAccountsBaseline' {
         Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
             @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
         }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $false }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserRequiresPassword { }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserPasswordExpired { }
 
@@ -185,6 +222,49 @@ Describe 'Set-LocalAccountsBaseline' {
         ($changes | Where-Object Setting -eq 'alice.PasswordRequired').Changed | Should -BeFalse
         Should -Invoke -ModuleName LocalAccounts -CommandName Set-LocalUserRequiresPassword -Times 0
         Should -Invoke -ModuleName LocalAccounts -CommandName Set-LocalUserPasswordExpired -Times 0
+    }
+
+    It 'clears "password never expires" for an account that already requires a password but still has it set' {
+        # Regression test for the real failure this session started from:
+        # the 'user' account was already PasswordRequired=True from a prior
+        # Apply run, so the PasswordRequired remediation branch never ran
+        # again - but it still had "Password never expires" set, which
+        # silently defeated the forced password change. This must be
+        # remediated on its own, independent of PasswordRequired's state.
+        Mock -ModuleName LocalAccounts -CommandName Get-AutoLogonEnabled { $false }
+        Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
+            @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
+        }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $true }
+        Mock -ModuleName LocalAccounts -CommandName Clear-LocalUserPasswordNeverExpires { }
+        Mock -ModuleName LocalAccounts -CommandName Set-LocalUserPasswordExpired { }
+
+        $changes = Set-LocalAccountsBaseline -Config (New-TestConfig)
+
+        $neverExpiresChange = $changes | Where-Object Setting -eq 'alice.PasswordNeverExpires'
+        $neverExpiresChange.Changed | Should -BeTrue
+        $neverExpiresChange.Note | Should -Match 'defeats'
+        Should -Invoke -ModuleName LocalAccounts -CommandName Clear-LocalUserPasswordNeverExpires -Times 1 -ParameterFilter { $Name -eq 'alice' }
+        # PasswordExpired must be re-forced here too - the earlier attempt
+        # already consumed it (Windows cleared it back to 0 on the logon
+        # that "Password never expires" silently let through), so clearing
+        # PasswordNeverExpires alone would leave nothing to prompt at the
+        # next logon.
+        Should -Invoke -ModuleName LocalAccounts -CommandName Set-LocalUserPasswordExpired -Times 1 -ParameterFilter { $Name -eq 'alice' }
+    }
+
+    It 'does not touch an account that already has "password never expires" cleared' {
+        Mock -ModuleName LocalAccounts -CommandName Get-AutoLogonEnabled { $false }
+        Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
+            @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
+        }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordNeverExpires { $false }
+        Mock -ModuleName LocalAccounts -CommandName Clear-LocalUserPasswordNeverExpires { }
+
+        $changes = Set-LocalAccountsBaseline -Config (New-TestConfig)
+
+        ($changes | Where-Object Setting -eq 'alice.PasswordNeverExpires').Changed | Should -BeFalse
+        Should -Invoke -ModuleName LocalAccounts -CommandName Clear-LocalUserPasswordNeverExpires -Times 0
     }
 }
 

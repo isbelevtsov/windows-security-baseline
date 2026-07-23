@@ -97,6 +97,22 @@ function Set-LocalUserTemporaryPassword {
     Set-LocalUser -Name $Name -Password $Password
 }
 
+function Get-LocalUserPasswordNeverExpires {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    # Get-LocalUser has no PasswordNeverExpires property (confirmed via
+    # Get-Member on real hardware) - read the raw UF_DONT_EXPIRE_PASSWD
+    # (0x10000) bit via ADSI instead.
+    $user = [ADSI]"WinNT://$env:COMPUTERNAME/$Name,user"
+    return (([int]$user.UserFlags.Value -band 0x10000) -ne 0)
+}
+
+function Clear-LocalUserPasswordNeverExpires {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    Set-LocalUser -Name $Name -PasswordNeverExpires $false
+}
+
 function Get-AutoLogonEnabled {
     [CmdletBinding()]
     param()
@@ -141,12 +157,30 @@ function Test-LocalAccountsBaseline {
     $passwordExpected = Get-BaselineValue -Section $Config -Name 'RequirePasswordForAllAccounts'
     $passwordDescription = Get-BaselineDescription -Section $Config -Name 'RequirePasswordForAllAccounts'
 
+    $neverExpiresExpected = Get-BaselineValue -Section $Config -Name 'DisablePasswordNeverExpires'
+    $neverExpiresDescription = Get-BaselineDescription -Section $Config -Name 'DisablePasswordNeverExpires'
+
     foreach ($user in Get-ManagedLocalUsers) {
         $actual = [bool]$user.PasswordRequired
         $results += [PSCustomObject]@{
             Module = 'LocalAccounts'; Setting = "$($user.Name).PasswordRequired"
             Expected = $passwordExpected; Actual = $actual; Pass = ($actual -eq $passwordExpected)
             Description = $passwordDescription
+        }
+
+        # Checked independently of PasswordRequired, not just as a side
+        # effect of remediating it: confirmed on real hardware that an
+        # account can already be PasswordRequired=True (e.g. from a prior
+        # Apply run) while still having "Password never expires" set from
+        # before this baseline ever touched it - and that combination
+        # silently defeats any future forced password change on that
+        # account (see Set-LocalAccountsBaseline), so it needs its own
+        # check to be remediated regardless of the account's other state.
+        $neverExpiresActual = -not (Get-LocalUserPasswordNeverExpires -Name $user.Name)
+        $results += [PSCustomObject]@{
+            Module = 'LocalAccounts'; Setting = "$($user.Name).PasswordNeverExpires"
+            Expected = $neverExpiresExpected; Actual = $neverExpiresActual; Pass = ($neverExpiresActual -eq $neverExpiresExpected)
+            Description = $neverExpiresDescription
         }
     }
 
@@ -258,6 +292,35 @@ function Set-LocalAccountsBaseline {
                 After   = $requirePasswordSucceeded
                 Changed = $true
                 Note    = $note
+            }
+        }
+        else {
+            $changes += [PSCustomObject]@{ Module = 'LocalAccounts'; Setting = $result.Setting; Before = $result.Actual; After = $result.Actual; Changed = $false }
+        }
+    }
+
+    foreach ($result in @($before | Where-Object { $_.Setting -like '*.PasswordNeverExpires' })) {
+        $userName = $result.Setting -replace '\.PasswordNeverExpires$', ''
+
+        if (-not $result.Pass) {
+            # Confirmed on real hardware: "Password never expires" set
+            # alongside a forced "must change at next logon" flag silently
+            # defeats that flag - the account holder logs on with the
+            # temporary/expired password and Windows never prompts for a
+            # new one, clearing PasswordExpired back to 0 in the process.
+            # Clearing PasswordNeverExpires alone is therefore not enough
+            # here - PasswordExpired also needs to be re-forced, or nothing
+            # will prompt at the next logon either, since the previous
+            # attempt already consumed it.
+            Clear-LocalUserPasswordNeverExpires -Name $userName
+            Set-LocalUserPasswordExpired -Name $userName
+            $changes += [PSCustomObject]@{
+                Module  = 'LocalAccounts'
+                Setting = $result.Setting
+                Before  = $result.Actual
+                After   = $true
+                Changed = $true
+                Note    = "Account '$userName' had 'Password never expires' set, which silently defeats any forced password change on that account - cleared, and the account has been forced to change its password at next logon again."
             }
         }
         else {
