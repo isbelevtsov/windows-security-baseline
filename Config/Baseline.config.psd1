@@ -115,7 +115,11 @@
         }
         RequirePasswordForAllAccounts = @{
             Value       = $true
-            Description = "Ensures every enabled local account requires a password, rejecting the 'password not required' flag that allows a blank password. There is no way to query whether an account's current password is literally blank, so any account found without this is also forced to change its password at next logon - the only way to guarantee a real, policy-compliant password gets set."
+            Description = "Ensures every enabled local account requires a password, rejecting the 'password not required' flag that allows a blank password. Forcing a password change at next logon alone isn't sufficient - confirmed on real hardware, a blank-password account's logon can bypass the credential-entry step that flag relies on - so a random, policy-compliant temporary password is also set immediately, invalidating the blank password right away. The account is still forced to change it at next logon so the temporary value doesn't linger."
+        }
+        TemporaryPasswordPath = @{
+            Value       = 'C:\ProgramData\SecurityBaseline\TemporaryPasswords'
+            Description = "Local folder where a generated temporary password is saved in plaintext when RequirePasswordForAllAccounts remediates a blank-password account, since the account holder needs it to log on once before setting their own. Secure, relocate, or delete each file after that happens."
         }
     }
 }

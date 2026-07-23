@@ -48,11 +48,16 @@ BitLocker for real.
 - [ ] `Get-LocalUser -Name Guest` shows `Enabled = False`.
 - [ ] Local accounts: `Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'` shows
       `AutoAdminLogon = 0` and no `DefaultPassword` value. Any enabled local account that
-      previously showed `PasswordRequired = False` in `Get-LocalUser` is forced to change
-      its password at next interactive logon — confirm by actually logging that account
-      out and back in (or switching user) and observing the "you must change your
-      password" prompt. `PasswordRequired` itself only flips to `True` on a *later* Apply
-      run, after that password has actually been changed to something policy-compliant.
+      previously showed `PasswordRequired = False` in `Get-LocalUser` now shows
+      `PasswordRequired = True` (`net user <name>` shows `Password required   Yes`)
+      immediately after a single Apply run, and a temporary password file exists at
+      `C:\ProgramData\SecurityBaseline\TemporaryPasswords\<name>-temp-password.txt`.
+      Confirm the forced change actually works by logging that account out and back in
+      (or switching user) using the password from that file, and observing the "you
+      must change your password" prompt — this is the step most worth re-checking after
+      any change here, since an earlier version of this fix looked correct from the
+      registry/cmdlet state alone but didn't actually prompt at the logon screen for a
+      genuinely blank-password account.
 - [ ] BitLocker: `Get-BitLockerVolume` shows `ProtectionStatus = On` for the OS drive
       (Pro/Enterprise) **or** the audit report notes it as unavailable rather than
       crashing (Home, if Device Encryption prerequisites like a TPM aren't present in
@@ -344,3 +349,64 @@ Note, no duplicate side effects), and `Restore` correctly reverted the
 autologon registry values while leaving `PasswordRequired` alone (per the
 module's intentionally one-way security posture) and never touching
 `DefaultPassword`.
+
+### 2026-07-23 — same VM, follow-up: forcing PasswordExpired alone was not enough
+
+Real-world feedback after rebooting the VM: the `user` account still had a
+blank password, autologon still wasn't requested to change it, and no
+"you must change your password" prompt appeared at the logon screen despite
+the fix above.
+
+Root cause: forcing `PasswordExpired = 1` only has an effect if the
+account's logon actually goes through an interactive credential-entry
+step. For an account with `PasswordRequired = $false` and a genuinely
+blank password, Windows' blank-password logon path (type nothing, press
+Enter/click the tile) evidently doesn't always route through that step on
+this build, so the "must change" flag never gets a chance to trigger. This
+also explains why nothing looked like "autologon" was ever actually
+enabled in the registry (`AutoAdminLogon` was `0` the whole time, confirmed
+directly) — the blank password alone was functionally equivalent to
+autologon from the user's point of view, since no real credential was ever
+required at the console.
+
+Fixed in `Modules/LocalAccounts.psm1`: stopped relying on `PasswordExpired`
+alone. `Set-LocalAccountsBaseline` now generates a random, policy-compliant
+24-character temporary password (`New-CompliantTemporaryPassword`, using
+all four character classes so it satisfies any reasonable complexity
+policy) and sets it immediately via `Set-LocalUser -Password` (found via
+`Get-Command -Syntax` that unlike `-PasswordRequired`, `-Password` **is**
+supported), invalidating the blank password right away rather than waiting
+for a logon-time prompt that might never come. `PasswordExpired` is still
+set on top of that so the account holder is forced to replace the
+temporary value with their own at next logon. Setting the password first
+also fixed the earlier "could not yet mark it as requiring a password"
+problem: `Set-LocalUserRequiresPassword` now succeeds immediately on the
+same `Apply` run, since the account's current password is compliant by
+the time it's called.
+
+The generated password is written in plaintext to
+`C:\ProgramData\SecurityBaseline\TemporaryPasswords\<username>-temp-password.txt`,
+the same plaintext-secret-with-a-clear-warning pattern already used for
+the BitLocker recovery key, since the account holder needs it to log on
+once. `Set-LocalUserRequiresPassword`'s try/catch fallback (for when
+`PasswordRequired` still can't be set) is kept as defense in depth even
+though this fix makes it far less likely to trigger.
+
+One more real bug hit while building this:
+`[System.Security.Cryptography.RandomNumberGenerator]::Fill(byte[])` —
+the modern static one-liner for filling a byte array with random data —
+does not exist in .NET Framework, which is what Windows PowerShell 5.1
+targets (it's a .NET Core/5+-only API). Fixed by using the classic
+`[RandomNumberGenerator]::Create()` / `.GetBytes(byte[])` instance API
+instead, which works on both.
+
+Verified end-to-end for real: `Get-LocalUser -Name user` and `net user
+user` both now show `PasswordRequired`/`Password required` as
+`True`/`Yes` immediately after a single `Apply` run (no more "pending"
+Note), the temporary password file was created with a real
+24-character/all-classes password, re-running `Apply` immediately after
+was fully idempotent (`0 setting(s) changed`), and a follow-up `Audit`
+shows the module fully compliant. **Still not confirmed by an actual
+interactive logon in this session** — re-run the Apply-mode checklist
+item above (log the account out and back in using the temporary password)
+and update this entry if the change-password prompt still doesn't appear.

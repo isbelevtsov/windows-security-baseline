@@ -6,7 +6,27 @@ BeforeAll {
         @{
             DisableAutoLogon              = @{ Value = $true; Description = 'autologon' }
             RequirePasswordForAllAccounts = @{ Value = $true; Description = 'password required' }
+            TemporaryPasswordPath         = @{ Value = (Join-Path $TestDrive 'TemporaryPasswords'); Description = 'temp password path' }
         }
+    }
+}
+
+Describe 'New-CompliantTemporaryPassword' {
+    It 'generates a 24-character password covering all four character classes' {
+        $password = InModuleScope -ModuleName LocalAccounts { New-CompliantTemporaryPassword }
+
+        $password.Length | Should -Be 24
+        $password | Should -Match '[A-Z]'
+        $password | Should -Match '[a-z]'
+        $password | Should -Match '[0-9]'
+        $password | Should -Match '[^A-Za-z0-9]'
+    }
+
+    It 'generates a different password on each call' {
+        $first = InModuleScope -ModuleName LocalAccounts { New-CompliantTemporaryPassword }
+        $second = InModuleScope -ModuleName LocalAccounts { New-CompliantTemporaryPassword }
+
+        $first | Should -Not -Be $second
     }
 }
 
@@ -90,11 +110,20 @@ Describe 'Set-LocalAccountsBaseline' {
         Should -Invoke -ModuleName LocalAccounts -CommandName Disable-AutoLogon -Times 0
     }
 
-    It 'forces a password-required account that currently allows a blank password to change password at next logon' {
+    It 'sets a temporary password, forces a change at next logon, and writes the password to a file' {
+        # Regression test for a real failure found on a rebooted VM: forcing
+        # only "must change password at next logon" was not enough - a
+        # genuinely blank-password account never showed a change prompt at
+        # the logon screen, since Windows' blank-password logon path doesn't
+        # always route through the credential-entry step that flag relies
+        # on. Invalidating the blank password immediately with a real
+        # temporary one is the only unconditional fix.
         Mock -ModuleName LocalAccounts -CommandName Get-AutoLogonEnabled { $false }
         Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
             @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $false })
         }
+        Mock -ModuleName LocalAccounts -CommandName New-CompliantTemporaryPassword { 'Tmp-Passw0rd!12345678' }
+        Mock -ModuleName LocalAccounts -CommandName Set-LocalUserTemporaryPassword { }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserRequiresPassword { }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserPasswordExpired { }
 
@@ -103,8 +132,15 @@ Describe 'Set-LocalAccountsBaseline' {
         $userChange = $changes | Where-Object Setting -eq 'alice.PasswordRequired'
         $userChange.Changed | Should -BeTrue
         $userChange.Note | Should -Match 'blank password'
+        $userChange.Note | Should -Match 'temporary password'
+        Should -Invoke -ModuleName LocalAccounts -CommandName Set-LocalUserTemporaryPassword -Times 1 -ParameterFilter { $Name -eq 'alice' }
         Should -Invoke -ModuleName LocalAccounts -CommandName Set-LocalUserRequiresPassword -Times 1 -ParameterFilter { $Name -eq 'alice' }
         Should -Invoke -ModuleName LocalAccounts -CommandName Set-LocalUserPasswordExpired -Times 1 -ParameterFilter { $Name -eq 'alice' }
+
+        $tempPasswordFile = Join-Path (Join-Path $TestDrive 'TemporaryPasswords') 'alice-temp-password.txt'
+        Test-Path -Path $tempPasswordFile | Should -BeTrue
+        Get-Content -Path $tempPasswordFile -Raw | Should -Match 'Tmp-Passw0rd!12345678'
+        $userChange.Note | Should -Match ([regex]::Escape($tempPasswordFile))
     }
 
     It 'still forces the password change and reports partial success when PasswordRequired cannot yet be set' {
@@ -112,14 +148,16 @@ Describe 'Set-LocalAccountsBaseline' {
         # has no -PasswordRequired parameter at all (confirmed via
         # Get-Command -Syntax), and the ADSI equivalent throws "The password
         # does not meet the password policy requirements" when the account's
-        # CURRENT password (e.g. blank) doesn't satisfy the active policy -
-        # exactly the account this is meant to fix. Forcing the password
-        # change must still happen and must not be skipped just because the
-        # PasswordRequired flip can't succeed yet.
+        # CURRENT password doesn't satisfy the active policy. Even with the
+        # temporary-password fix above, this is kept as defense in depth -
+        # forcing the password change must still happen and must not be
+        # skipped just because the PasswordRequired flip can't succeed yet.
         Mock -ModuleName LocalAccounts -CommandName Get-AutoLogonEnabled { $false }
         Mock -ModuleName LocalAccounts -CommandName Get-ManagedLocalUsers {
             @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $false })
         }
+        Mock -ModuleName LocalAccounts -CommandName New-CompliantTemporaryPassword { 'Tmp-Passw0rd!12345678' }
+        Mock -ModuleName LocalAccounts -CommandName Set-LocalUserTemporaryPassword { }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserRequiresPassword { throw 'The password does not meet the password policy requirements.' }
         Mock -ModuleName LocalAccounts -CommandName Set-LocalUserPasswordExpired { }
 
@@ -130,6 +168,7 @@ Describe 'Set-LocalAccountsBaseline' {
         $userChange.After | Should -BeFalse
         $userChange.Note | Should -Match 'blank password'
         $userChange.Note | Should -Match 'later Apply run'
+        Should -Invoke -ModuleName LocalAccounts -CommandName Set-LocalUserTemporaryPassword -Times 1 -ParameterFilter { $Name -eq 'alice' }
         Should -Invoke -ModuleName LocalAccounts -CommandName Set-LocalUserPasswordExpired -Times 1 -ParameterFilter { $Name -eq 'alice' }
     }
 

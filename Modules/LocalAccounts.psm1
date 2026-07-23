@@ -45,6 +45,58 @@ function Set-LocalUserPasswordExpired {
     $user.SetInfo() | Out-Null
 }
 
+function New-CompliantTemporaryPassword {
+    [CmdletBinding()]
+    param()
+
+    # Deliberately not read from the PasswordPolicy module's config - each
+    # module here only ever receives its own config section (see
+    # Set-LocalAccountsBaseline/Common/Orchestrator.psm1), and coupling this
+    # one to another module's settings would break that isolation. 24
+    # characters covering all four character classes comfortably satisfies
+    # any reasonable length/complexity policy regardless of what's
+    # configured, so there's no need to read it.
+    $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+    $lower = 'abcdefghijkmnopqrstuvwxyz'
+    $digits = '23456789'
+    $symbols = '!@#$%^&*-_=+?'
+    $all = $upper + $lower + $digits + $symbols
+    $length = 24
+
+    # RandomNumberGenerator's static Fill() method doesn't exist in .NET
+    # Framework (confirmed on real hardware under Windows PowerShell 5.1,
+    # which targets .NET Framework, not .NET Core/5+) - use the classic
+    # instance-based Create()/GetBytes() API, which works on both.
+    $bytes = [byte[]]::new($length)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    }
+    finally {
+        $rng.Dispose()
+    }
+
+    $chars = for ($i = 0; $i -lt $length; $i++) { $all[$bytes[$i] % $all.Length] }
+    # Force at least one of each character class into fixed positions so
+    # complexity requirements are met regardless of what the random draw
+    # produced everywhere else.
+    $chars[0] = $upper[$bytes[0] % $upper.Length]
+    $chars[1] = $lower[$bytes[1] % $lower.Length]
+    $chars[2] = $digits[$bytes[2] % $digits.Length]
+    $chars[3] = $symbols[$bytes[3] % $symbols.Length]
+
+    -join $chars
+}
+
+function Set-LocalUserTemporaryPassword {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][securestring]$Password
+    )
+    Set-LocalUser -Name $Name -Password $Password
+}
+
 function Get-AutoLogonEnabled {
     [CmdletBinding()]
     param()
@@ -139,6 +191,7 @@ function Set-LocalAccountsBaseline {
 
     $before = Test-LocalAccountsBaseline -Config $Config
     $changes = @()
+    $tempPasswordFolder = Get-BaselineValue -Section $Config -Name 'TemporaryPasswordPath'
 
     $autoLogonResult = $before | Where-Object { $_.Setting -eq 'AutoLogonDisabled' }
     if (-not $autoLogonResult.Pass) {
@@ -161,13 +214,27 @@ function Set-LocalAccountsBaseline {
         $userName = $result.Setting -replace '\.PasswordRequired$', ''
 
         if (-not $result.Pass) {
-            # Force the password change first - unlike the PasswordRequired
-            # flip below, this doesn't validate the account's current
-            # password against policy, so it always succeeds regardless of
-            # whether that password is blank or otherwise non-compliant.
+            # Forcing "must change password at next logon" alone is not
+            # enough: confirmed on real hardware (a VM rebooted after an
+            # earlier Apply run) that an account with a genuinely blank
+            # password never showed a change prompt at the logon screen at
+            # all - Windows' blank-password logon path evidently doesn't
+            # always route through the credential-entry step that flag
+            # relies on. The only remediation that closes the gap
+            # unconditionally is to invalidate the blank password right now
+            # by setting a real one, which also resolves the chicken-and-egg
+            # problem below (PasswordRequired can only be set once the
+            # current password is compliant).
+            $tempPassword = New-CompliantTemporaryPassword
+            $securePassword = ConvertTo-SecureString -String $tempPassword -AsPlainText -Force
+            Set-LocalUserTemporaryPassword -Name $userName -Password $securePassword
+
+            # Still force a change at next logon on top of that, so the
+            # admin-generated temporary password doesn't linger - the
+            # account holder uses it once, then picks their own.
             Set-LocalUserPasswordExpired -Name $userName
 
-            $note = "Account '$userName' allowed a blank password (PasswordRequired was False) and has been forced to change its password at next logon, since its current password could not otherwise be verified."
+            $note = "Account '$userName' allowed a blank password (PasswordRequired was False). A temporary password has been set and the account has been forced to change it at next logon."
             $requirePasswordSucceeded = $true
             try {
                 Set-LocalUserRequiresPassword -Name $userName
@@ -176,6 +243,13 @@ function Set-LocalAccountsBaseline {
                 $requirePasswordSucceeded = $false
                 $note = "$note Could not yet mark it as requiring a password: $($_.Exception.Message) This is expected while the account's current password still doesn't meet policy - it will succeed automatically on a later Apply run, once the user has changed it."
             }
+
+            if (-not (Test-Path -Path $tempPasswordFolder)) {
+                New-Item -Path $tempPasswordFolder -ItemType Directory -Force | Out-Null
+            }
+            $tempPasswordFile = Join-Path -Path $tempPasswordFolder -ChildPath "$userName-temp-password.txt"
+            Set-Content -Path $tempPasswordFile -Value $tempPassword
+            $note = "$note Temporary password written in plaintext to '$tempPasswordFile' - secure or relocate it, and delete it once the account holder has logged in and set their own password."
 
             $changes += [PSCustomObject]@{
                 Module  = 'LocalAccounts'
