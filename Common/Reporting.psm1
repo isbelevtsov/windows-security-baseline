@@ -61,6 +61,23 @@ function Write-BaselineApplySummary {
     Write-Host "Backup saved to: $BackupPath"
     Write-Host "Full log: $LogPath"
     Write-Host "To revert: .\Invoke-SecurityBaseline.ps1 -Mode Restore -Timestamp `"$(Split-Path -Path $BackupPath -Leaf)`""
+
+    # A change record carries a Secret (BitLocker recovery key, a generated
+    # LocalAccounts temporary password) only when Set-<Area>Baseline just
+    # generated one - these are also written to a file, but that's easy to
+    # miss in the console output, so surface the actual value here too,
+    # highlighted, right where the operator is already looking.
+    $secrets = @($ChangeRecords | Where-Object { $_.Secret })
+    if ($secrets.Count -gt 0) {
+        Write-Host ''
+        Write-Host '=== SAVE THESE NOW - generated secrets ===' -ForegroundColor Black -BackgroundColor Yellow
+        foreach ($secret in $secrets) {
+            $label = $(if ($secret.SecretLabel) { $secret.SecretLabel } else { $secret.Setting })
+            Write-Host "[$($secret.Module)] $label" -ForegroundColor Yellow
+            Write-Host "  $($secret.Secret)" -ForegroundColor Black -BackgroundColor Yellow
+        }
+        Write-Host ''
+    }
 }
 
 Export-ModuleMember -Function New-BaselineAuditReport, Write-BaselineAuditSummary, Write-BaselineApplySummary

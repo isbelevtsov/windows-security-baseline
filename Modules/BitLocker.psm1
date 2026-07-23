@@ -175,6 +175,7 @@ function Set-BitLockerBaseline {
 
     $changed = $false
     $note = $null
+    $recoveryKey = $null
 
     if (-not $before.Pass) {
         $tpmProtectorAdded = Enable-OsDriveBitLocker -EncryptionMethod $method
@@ -200,12 +201,14 @@ function Set-BitLockerBaseline {
 
     @(
         [PSCustomObject]@{
-            Module  = 'BitLocker'
-            Setting = 'OSDriveEncrypted'
-            Before  = $before.Actual
-            After   = $(if ($changed) { $true } else { $before.Actual })
-            Changed = $changed
-            Note    = $note
+            Module      = 'BitLocker'
+            Setting     = 'OSDriveEncrypted'
+            Before      = $before.Actual
+            After       = $(if ($changed) { $true } else { $before.Actual })
+            Changed     = $changed
+            Note        = $note
+            Secret      = $recoveryKey
+            SecretLabel = 'BitLocker recovery key'
         }
     )
 }

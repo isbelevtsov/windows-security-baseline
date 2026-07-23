@@ -286,12 +286,14 @@ function Set-LocalAccountsBaseline {
             $note = "$note Temporary password written in plaintext to '$tempPasswordFile' - secure or relocate it, and delete it once the account holder has logged in and set their own password."
 
             $changes += [PSCustomObject]@{
-                Module  = 'LocalAccounts'
-                Setting = $result.Setting
-                Before  = $result.Actual
-                After   = $requirePasswordSucceeded
-                Changed = $true
-                Note    = $note
+                Module      = 'LocalAccounts'
+                Setting     = $result.Setting
+                Before      = $result.Actual
+                After       = $requirePasswordSucceeded
+                Changed     = $true
+                Note        = $note
+                Secret      = $tempPassword
+                SecretLabel = "Temporary password for '$userName'"
             }
         }
         else {

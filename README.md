@@ -146,7 +146,11 @@ by HIPAA itself.
 One setting needs particular attention: `BitLocker.RecoveryKeyPath`. Since a
 standalone device has no Active Directory or Entra ID to escrow the recovery
 key to, it's written in plaintext to a local folder — move or secure that
-file after `Apply` runs.
+file after `Apply` runs. The same applies to `LocalAccounts.TemporaryPasswordPath`,
+used when an account with a blank password gets a temporary one set. Whenever
+`Apply` generates either of these, the value is also printed to the console
+in a highlighted `SAVE THESE NOW` block, in addition to being written to its
+file — easy to miss otherwise among everything else `Apply` prints.
 
 ## Backup and restore
 

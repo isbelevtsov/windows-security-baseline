@@ -176,6 +176,9 @@ Describe 'Set-LocalAccountsBaseline' {
         Test-Path -Path $tempPasswordFile | Should -BeTrue
         Get-Content -Path $tempPasswordFile -Raw | Should -Match 'Tmp-Passw0rd!12345678'
         $userChange.Note | Should -Match ([regex]::Escape($tempPasswordFile))
+
+        $userChange.Secret | Should -Be 'Tmp-Passw0rd!12345678'
+        $userChange.SecretLabel | Should -Match 'alice'
     }
 
     It 'still forces the password change and reports partial success when PasswordRequired cannot yet be set' {

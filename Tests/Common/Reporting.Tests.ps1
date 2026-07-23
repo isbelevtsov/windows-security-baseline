@@ -81,4 +81,41 @@ Describe 'Write-BaselineApplySummary' {
         $output | Should -Match '1 setting\(s\) changed'
         $output | Should -Match '2026-07-21_120000'
     }
+
+    It 'highlights a generated secret in the console output' {
+        $records = @(
+            [PSCustomObject]@{
+                Module = 'BitLocker'; Setting = 'OSDriveEncrypted'; Before = $false; After = $true; Changed = $true
+                Secret = '123456-654321-111111-222222-333333-444444-555555-666666'; SecretLabel = 'BitLocker recovery key'
+            }
+        )
+        $output = Write-BaselineApplySummary -ChangeRecords $records -BackupPath 'C:\ProgramData\SecurityBaseline\Backups\2026-07-21_120000' -LogPath 'C:\ProgramData\SecurityBaseline\Logs\2026-07-21_120000.log' 6>&1 | Out-String
+        $output | Should -Match 'SAVE THESE NOW'
+        $output | Should -Match 'BitLocker recovery key'
+        $output | Should -Match '123456-654321-111111-222222-333333-444444-555555-666666'
+    }
+
+    It 'shows nothing extra when no change record carries a secret' {
+        $records = @(
+            [PSCustomObject]@{ Setting = 'MinimumPasswordLength'; Before = 7; After = 14; Changed = $true }
+        )
+        $output = Write-BaselineApplySummary -ChangeRecords $records -BackupPath 'C:\ProgramData\SecurityBaseline\Backups\2026-07-21_120000' -LogPath 'C:\ProgramData\SecurityBaseline\Logs\2026-07-21_120000.log' 6>&1 | Out-String
+        $output | Should -Not -Match 'SAVE THESE NOW'
+    }
+
+    It 'highlights multiple secrets when more than one change record carries one' {
+        $records = @(
+            [PSCustomObject]@{
+                Module = 'BitLocker'; Setting = 'OSDriveEncrypted'; Before = $false; After = $true; Changed = $true
+                Secret = 'RECOVERY-KEY-VALUE'; SecretLabel = 'BitLocker recovery key'
+            }
+            [PSCustomObject]@{
+                Module = 'LocalAccounts'; Setting = 'alice.PasswordRequired'; Before = $false; After = $true; Changed = $true
+                Secret = 'TEMP-PASSWORD-VALUE'; SecretLabel = "Temporary password for 'alice'"
+            }
+        )
+        $output = Write-BaselineApplySummary -ChangeRecords $records -BackupPath 'C:\ProgramData\SecurityBaseline\Backups\2026-07-21_120000' -LogPath 'C:\ProgramData\SecurityBaseline\Logs\2026-07-21_120000.log' 6>&1 | Out-String
+        $output | Should -Match 'RECOVERY-KEY-VALUE'
+        $output | Should -Match 'TEMP-PASSWORD-VALUE'
+    }
 }

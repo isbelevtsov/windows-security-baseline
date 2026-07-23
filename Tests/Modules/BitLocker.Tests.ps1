@@ -224,6 +224,26 @@ Describe 'Set-BitLockerBaseline' {
         Should -Invoke -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker -Times 0
         $changes[0].Note | Should -BeNullOrEmpty
     }
+
+    It 'attaches the recovery key as a highlightable Secret when one is written' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { $true }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
+
+        $changes = Set-BitLockerBaseline -Config (New-TestConfig)
+
+        $changes[0].Secret | Should -Be 'AAAA-1111-BBBB-2222'
+        $changes[0].SecretLabel | Should -Match 'recovery key'
+    }
+
+    It 'does not attach a Secret when already protected' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'On' } }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { }
+
+        $changes = Set-BitLockerBaseline -Config (New-TestConfig)
+
+        $changes[0].Secret | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Restore-BitLockerSettings' {
