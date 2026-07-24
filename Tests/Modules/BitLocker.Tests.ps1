@@ -335,17 +335,21 @@ Describe 'Set-BitLockerBaseline' {
         # Drive Encryption") - initially reproduced for every protector
         # combination, including via Invoke-CimMethod directly against the
         # raw Win32_EncryptableVolume WMI provider, and taken as proof of a
-        # hard edition restriction. That did not hold up: on the same VM,
-        # the exact same Enable-BitLocker call stopped throwing this error
-        # and succeeded normally the moment a bootable CD/DVD (a mounted
-        # ISO) was ejected from a virtual optical drive - no edition or
-        # hardware change at all. So this HRESULT is not reliable proof of
-        # a genuine edition block; the Note leads with the actionable,
-        # disprovable step (check for mounted media) rather than asserting
-        # this device can never support BitLocker. Regardless of the exact
-        # cause, this must never crash the module the way it did before this
-        # fix - the exception used to propagate all the way out of
-        # Set-BitLockerBaseline and was only ever caught by the
+        # hard edition restriction. That was only half right: on the same
+        # VM, the exact same Enable-BitLocker call stopped throwing this
+        # error and succeeded normally (added a TPM + recovery-password
+        # protector, reached ProtectionStatus=On) the moment a bootable
+        # CD/DVD (a mounted ISO) was ejected - but only on a volume that
+        # already had prior BitLocker metadata. A follow-up test on a
+        # volume with no prior metadata at all (MetadataVersion=0, right
+        # after a full decrypt) hit this same HRESULT again with no media
+        # present, and a reboot didn't change that either - so this HRESULT
+        # can mean either a retriable media-blocking condition or a genuine
+        # per-volume/hardware limitation, and the Note reflects both rather
+        # than asserting either one with false certainty. Regardless of the
+        # exact cause, this must never crash the module the way it did
+        # before this fix - the exception used to propagate all the way out
+        # of Set-BitLockerBaseline and was only ever caught by the
         # Orchestrator's generic per-module catch-all, logging "Apply of
         # module 'BitLocker' failed, skipping".
         Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }

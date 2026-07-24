@@ -5,25 +5,32 @@ $script:BitLockerKnownApiLimitations = @(
         # HRESULT 0x8031005A ("This version of Windows does not support this
         # feature of BitLocker Drive Encryption. To use this feature, upgrade
         # the operating system.") is documented as an edition/SKU restriction,
-        # and was first seen throwing from every Enable-BitLocker call on a
-        # Windows 11 Home test VM, including via Invoke-CimMethod directly
-        # against the raw Win32_EncryptableVolume WMI provider (bypassing the
-        # "BitLocker" cmdlet module entirely) - initially taken as proof Home
-        # can never support this regardless of hardware. That conclusion did
-        # not hold up: on the same VM, with the exact same Enable-BitLocker
-        # call, this error stopped happening the moment a bootable CD/DVD (a
-        # mounted ISO in a virtual optical drive) was ejected - after which
-        # BitLocker activated normally, added a TPM + recovery-password
-        # protector, and reached ProtectionStatus=On with no other change.
-        # So this HRESULT is not a reliable signal of a genuine edition
-        # block by itself; it can also surface for other blocking
-        # preconditions (confirmed: bootable media present) that Windows
-        # reports under the same code. Still handled gracefully rather than
-        # left to crash the module, but the Note below leads with the
-        # actionable, disprovable step (check for mounted media) before
-        # concluding it's a hard platform limitation.
+        # but real testing on a Windows 11 Home VM found it is not a reliable
+        # signal of that by itself - it surfaced for at least two distinct,
+        # confirmed root causes on the same machine:
+        #
+        # 1. A bootable CD/DVD (a mounted ISO) present in an optical drive.
+        #    Ejecting it made Enable-BitLocker succeed immediately on a volume
+        #    that already had prior BitLocker metadata (KeyProtector-capable,
+        #    MetadataVersion > 0) - added a TPM + recovery-password protector,
+        #    reached ProtectionStatus=On, no other change.
+        # 2. A volume with NO prior BitLocker metadata at all (MetadataVersion
+        #    = 0, e.g. immediately after a full Disable-BitLocker/decrypt).
+        #    On this same VM/edition/hardware, with no optical media mounted,
+        #    Enable-BitLocker - and the raw Win32_EncryptableVolume WMI
+        #    PrepareVolume method directly, bypassing every cmdlet layer -
+        #    both threw this identical HRESULT. A reboot (to let Windows'
+        #    background Device Encryption readiness process re-stage the
+        #    volume, which is the likely explanation for why case 1's volume
+        #    had metadata to begin with) did not change the outcome either.
+        #
+        # So case 1 is a real, retriable condition worth checking first; case
+        # 2 looks like a genuine per-volume/hardware limitation this toolkit
+        # cannot route around via any API it can reach - confirmed at the
+        # lowest possible layer, not just the cmdlet. Both are still handled
+        # gracefully rather than left to crash the module.
         HResult = -2144272294
-        Note    = "Enable-BitLocker returned HRESULT 0x8031005A ('This version of Windows does not support this feature of BitLocker Drive Encryption'). Despite the wording, this is not reliably a hard Windows-edition block: on real Windows 11 Home hardware, this exact error occurred consistently while a CD/DVD (including a mounted ISO) was present in an optical drive, and disappeared the moment that media was ejected, after which BitLocker activated normally on the same Home machine. Before concluding this edition can't support BitLocker: eject any mounted CD/DVD/ISO from every optical drive and re-run Apply. If it still recurs with no optical media present at all, it may be a genuine edition/hardware limitation - Home relies on Windows' own automatic Device Encryption in that case, which isn't scriptable; check Settings > Privacy & security > Device encryption, or sign in with a Microsoft account during setup, which triggers it automatically on eligible hardware."
+        Note    = "Enable-BitLocker returned HRESULT 0x8031005A ('This version of Windows does not support this feature of BitLocker Drive Encryption'). This is not a reliable signal of a hard edition block by itself - on real Windows 11 Home hardware it was confirmed to also occur (a) whenever a CD/DVD, including a mounted ISO, was present in any optical drive, resolved by ejecting it and retrying, and separately (b) on a volume with no prior BitLocker metadata at all (e.g. right after a full decrypt), where it persisted even with no media present and after a reboot - the lowest-level Win32_EncryptableVolume.PrepareVolume WMI call failed identically, with no cmdlet involved. First: eject any mounted CD/DVD/ISO from every optical drive and re-run Apply. If it still recurs with no media present, this may be a per-volume/hardware limitation with no further scriptable fix - Home's automatic Device Encryption (Settings > Privacy & security > Device encryption) may or may not succeed either, since it relies on the same underlying mechanism."
     }
     @{
         # HRESULT 0x80310030 ("BitLocker Drive Encryption detected bootable

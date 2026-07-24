@@ -875,3 +875,69 @@ throws `0x8031005A` on any edition, check for mounted CD/DVD/ISO media in
 every optical drive (`Get-Volume | Where-Object DriveType -eq 'CD-ROM'`)
 and eject it before concluding the edition can't support BitLocker - this
 is now a known false signal, not confirmed proof.
+
+### 2026-07-24 — same Home VM, second correction: a fully-reset volume genuinely cannot re-enable BitLocker here
+
+As a final validation pass, asked to restore every module to the VM's
+true pre-`Apply` snapshot (including `-DecryptOnRestore` for BitLocker,
+fully decrypting the OS drive back to 0%) and then re-`Apply` from
+scratch, to confirm this session's fixes hold up end-to-end. 34 of 35
+non-compliant settings re-applied correctly and matched the original
+hardened state exactly (password policy, lockout, firewall, audit policy,
+etc. all spot-checked directly). BitLocker did not.
+
+`Enable-BitLocker` threw `0x8031005A` again - but this time with **no**
+optical media mounted at all (confirmed via `Get-Volume`), which the entry
+above would have called proof of a genuine edition/hardware limitation.
+Investigating further: `Get-BitLockerVolume` showed the freshly-decrypted
+volume at `MetadataVersion = 0`, whereas it had been `MetadataVersion = 2`
+(no protectors, but *some* prior BitLocker metadata already present) the
+very first time it was ever inspected this session, before any testing
+began. Calling the lowest-level `Win32_EncryptableVolume.PrepareVolume`
+WMI method directly - the step that initializes BitLocker metadata from
+an absolutely blank volume, bypassing every cmdlet layer - failed with the
+identical `0x8031005A` on this now-`MetadataVersion = 0` volume. A full VM
+restart (to test whether Windows' background Device Encryption readiness
+process would re-stage the metadata skeleton the way it apparently had
+before, unprompted) did not change the outcome: `PrepareVolume` still
+fails identically post-reboot, and `msinfo32`'s "Automatic Device
+Encryption Support" diagnostic still reports "TPM is not usable" for this
+QEMU virtual TPM, unchanged from the very first time it was checked.
+
+So the fuller, now best-understood picture: this VM's OS drive already
+had non-zero BitLocker metadata staged before this project ever touched
+it (origin unconfirmed - most likely Windows' own automatic Device
+Encryption readiness process running once during the VM's initial
+provisioning/first boot, independent of the "TPM is not usable" block on
+*triggering* automatic encryption itself). Home can successfully add
+protectors and encrypt a volume that already has that metadata staged
+(confirmed twice, real encryption both times, `ProtectionStatus` reaching
+`On`). But initializing BitLocker metadata on a **genuinely blank**
+volume - which is exactly what a full decrypt produces - appears to be a
+real, per-volume/hardware limitation on this machine that this toolkit
+cannot route around via any API it can reach, confirmed at the lowest
+possible layer and unaffected by a reboot.
+
+**Net result: this VM's OS drive is currently unencrypted and this
+toolkit cannot currently re-enable BitLocker on it.** This is a direct,
+known consequence of the `-DecryptOnRestore` validation step above, not a
+regression introduced by any code change, and not something any fix in
+this codebase can address - the block is inside Windows' own encryption
+engine reacting to this volume/hardware's current state, not in a cmdlet
+wrapper. Every other module was re-verified fully hardened and correct.
+
+Fixed in `Modules/BitLocker.psm1`: the `0x8031005A` Note now describes
+both confirmed root causes (retriable bootable-media block, and this
+non-retriable blank-volume limitation) instead of the previous entry's
+still-too-confident "eject media, it's not really edition-related"
+framing - which was accurate for the case it was tested against, but
+incomplete, as this entry's own testing shows. Regression test comments
+updated to match; the module's behavior (graceful `Changed=False`, never
+crash) was already correct and needed no logic change, only a more honest
+Note.
+
+**Open question for a future session**: whether this is recoverable at
+all on this specific VM (e.g. via a clean Windows reinstall, a different
+virtual TPM implementation, or simply time/other Windows-triggered
+staging this session didn't discover) is unknown - noted here rather than
+guessed at further.
