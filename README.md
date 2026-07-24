@@ -149,6 +149,47 @@ file for your own environment and risk tolerance before running `Apply`** —
 the defaults are NIST-aligned starting points, not requirements handed down
 by HIPAA itself.
 
+| Module | Key | Default | Description |
+|---|---|---|---|
+| PasswordPolicy | `MinimumPasswordLength` | `14` | Minimum characters required. HIPAA doesn't mandate a specific number; NIST SP 800-63B recommends 14+ over relying on complexity rules. |
+| PasswordPolicy | `PasswordComplexity` | `$true` | Requires a mix of character classes (upper/lower/digit/symbol) when set. |
+| PasswordPolicy | `PasswordHistorySize` | `24` | Number of previous passwords remembered to prevent reuse. |
+| PasswordPolicy | `MaximumPasswordAgeDays` | `90` | Days before a password must be changed. Set to 0 to disable expiry (NIST 800-63B now discourages forced periodic rotation, but many HIPAA auditors still expect it). |
+| PasswordPolicy | `MinimumPasswordAgeDays` | `1` | Minimum days before a password can be changed again, preventing rapid cycling back to an old password. |
+| AccountLockout | `LockoutThreshold` | `5` | Failed logon attempts allowed before the account locks. |
+| AccountLockout | `LockoutDurationMinutes` | `15` | How long a locked account stays locked before auto-unlocking. |
+| AccountLockout | `ObservationWindowMinutes` | `15` | Time window during which failed attempts count toward the lockout threshold. |
+| ScreenLock | `InactivityTimeoutSeconds` | `900` | Idle seconds before the machine locks (900 = 15 minutes). This is the 'machine inactivity limit,' independent of screensaver settings. |
+| AuditPolicy | `Categories` | `Logon=SuccessAndFailure`, `Logoff=Success`, `Account Lockout=SuccessAndFailure`, `User Account Management=SuccessAndFailure`, `Security Group Management=SuccessAndFailure`, `Removable Storage=Failure`, `Audit Policy Change=SuccessAndFailure`, `Sensitive Privilege Use=Failure` | Advanced audit policy subcategories (exact `auditpol.exe /subcategory:` names) and what outcomes to log for each, supporting HIPAA's audit control requirement. |
+| Defender | `RealTimeProtection` | `$true` | Keeps Defender's real-time scanning engine active. |
+| Defender | `CloudProtection` | `$true` | Enables cloud-delivered protection (MAPS) for faster response to new threats. |
+| Defender | `PUAProtection` | `'Enabled'` | Blocks potentially unwanted applications (adware, bundled software). |
+| Firewall | `EnabledProfiles` | `@('Domain','Private','Public')` | Firewall profiles that must be turned on. |
+| Firewall | `DefaultInboundAction` | `'Block'` | Default action for inbound connections with no matching allow rule. |
+| Firewall | `LoggingEnabled` | `$true` | Enables firewall connection logging for audit/troubleshooting. |
+| RemoteAccess | `DisableRDP` | `$true` | Disables inbound Remote Desktop entirely. Set to `$false` if this device needs RDP for support access, or exclude the RemoteAccess module via `-Modules`. |
+| RemoteAccess | `DisableSMBv1` | `$true` | Disables the legacy SMBv1 protocol, which has no meaningful modern use case and a history of critical vulnerabilities (e.g. EternalBlue). |
+| RemoteAccess | `DisableGuestAccount` | `$true` | Disables the built-in Guest account to prevent unauthenticated/low-friction local access. |
+| BitLocker | `EncryptionMethod` | `'XtsAes256'` | Encryption algorithm used for the OS drive. |
+| BitLocker | `RecoveryKeyPath` | `'C:\ProgramData\SecurityBaseline\RecoveryKeys'` | Local folder where the BitLocker recovery key is saved, since standalone/workgroup devices have no AD/Entra to escrow it to. Secure or relocate this folder's contents as a manual follow-up. |
+| LocalAccounts | `DisableAutoLogon` | `$true` | Disables Windows automatic sign-in (AutoAdminLogon). Autologon stores the account's password in plaintext in the registry (`Winlogon\DefaultPassword`) and skips the logon prompt/screen lock entirely, both of which defeat the other controls in this baseline. |
+| LocalAccounts | `RequirePasswordForAllAccounts` | `$true` | Ensures every enabled local account requires a password, rejecting the 'password not required' flag that allows a blank password. A random, policy-compliant temporary password is set immediately on any account that fails this, and the account is forced to change it at next logon. |
+| LocalAccounts | `TemporaryPasswordPath` | `'C:\ProgramData\SecurityBaseline\TemporaryPasswords'` | Local folder where a generated temporary password is saved in plaintext when `RequirePasswordForAllAccounts` remediates a blank-password account, since the account holder needs it to log on once before setting their own. Secure, relocate, or delete each file after that happens. |
+| LocalAccounts | `DisablePasswordNeverExpires` | `$true` | Clears the 'Password never expires' flag on every enabled local account, since it silently defeats any forced 'must change password at next logon' action on that same account. |
+| WindowsUpdate | `AutomaticUpdatesEnabled` | `$true` | Ensures automatic updates aren't disabled via policy (`NoAutoUpdate=0`). An unpatched machine undermines every other control in this baseline. |
+| WindowsUpdate | `DeferQualityUpdatesDays` | `0` | Maximum days security/quality updates may be deferred (`DeferQualityUpdatesPeriodInDays`). 0 means install as soon as available. |
+| PowerShellLogging | `EnableScriptBlockLogging` | `$true` | Logs the full text of executed PowerShell script blocks (including deobfuscated content) to the PowerShell/Operational event log. |
+| PowerShellLogging | `EnableModuleLogging` | `$true` | Logs pipeline execution details for PowerShell modules/snap-ins to the event log, scoped to all modules. |
+| PowerShellLogging | `EnableTranscription` | `$true` | Writes a transcript of every PowerShell session (commands and output) to `TranscriptOutputPath`, independent of and complementary to script block logging. |
+| PowerShellLogging | `TranscriptOutputPath` | `'C:\ProgramData\SecurityBaseline\PowerShellTranscripts'` | Local folder where PowerShell session transcripts are written when `EnableTranscription` is on. |
+| RemovableStorage | `DenyWriteAccess` | `$true` | Blocks write access to removable disks (USB mass storage) system-wide, reducing the most common PHI exfiltration path on a standalone device with no DLP tooling, while leaving read access available. |
+| UAC | `EnableLUA` | `$true` | Keeps User Account Control itself turned on. Disabling this entirely removes UAC's split-token/elevation model. |
+| UAC | `ConsentPromptBehaviorAdmin` | `2` | Requires administrators to consent to elevation on the secure desktop (2 = 'Prompt for consent on the secure desktop') rather than silently elevating (0) or prompting on the regular, spoofable desktop. |
+| UAC | `PromptOnSecureDesktop` | `$true` | Ensures the UAC consent/credential prompt itself renders on the secure desktop, where other processes can't inject input or overlay a fake prompt. |
+| NetworkHardening | `LmCompatibilityLevel` | `5` | Minimum acceptable LmCompatibilityLevel (0-5 scale; 5 = 'Send NTLMv2 response only, refuse LM and NTLM'). Rejects the legacy LM and NTLMv1 authentication protocols while still allowing NTLMv2. |
+| NetworkHardening | `DisableLLMNR` | `$true` | Disables Link-Local Multicast Name Resolution (LLMNR), which is spoofable by anyone else on the network (LLMNR/NBT-NS poisoning) to harvest NTLM hashes. |
+| EventLogRetention | `MinimumMaxSizeBytes` | `104857600` | Minimum maximum-size (100 MB) for the Application, Security, and System event logs. Windows' small default sizes (as low as 20 MB for Security) can roll over and silently discard audit history within hours on an active machine. |
+
 One setting needs particular attention: `BitLocker.RecoveryKeyPath`. Since a
 standalone device has no Active Directory or Entra ID to escrow the recovery
 key to, it's written in plaintext to a local folder — move or secure that
