@@ -249,6 +249,7 @@ function Restore-BitLockerSettings {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$BackupPath,
+        [hashtable]$Config,
         [switch]$DecryptOnRestore
     )
 
@@ -276,6 +277,18 @@ function Restore-BitLockerSettings {
     $alreadyDecrypting = "$((Get-OsDriveBitLockerVolume).VolumeStatus)" -in @('DecryptionInProgress', 'FullyDecrypted')
     if ($saved.ProtectionStatus -ne 'On' -and -not $alreadyDecrypting) {
         Disable-OsDriveBitLocker
+    }
+
+    # Reaching here means decryption genuinely succeeded (or was already
+    # under way/complete, or was never needed) - Disable-OsDriveBitLocker
+    # above would have thrown otherwise and this line would never run. The
+    # recovery key Set-BitLockerBaseline saved to disk is now just a stale
+    # plaintext secret, so clean it up rather than leaving it behind.
+    if ($Config) {
+        $keyFolder = Get-BaselineValue -Section $Config -Name 'RecoveryKeyPath'
+        $safeName = $env:SystemDrive.Replace(':', '')
+        $keyFile = Join-Path -Path $keyFolder -ChildPath "$safeName-recovery-key.txt"
+        Remove-Item -Path $keyFile -Force -ErrorAction SilentlyContinue
     }
 
     return [PSCustomObject]@{ Module = 'BitLocker'; Setting = 'OSDriveEncrypted'; Restored = $true }

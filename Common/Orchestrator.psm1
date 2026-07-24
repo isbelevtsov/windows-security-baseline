@@ -150,12 +150,14 @@ function Invoke-RestoreRun {
     param(
         [Parameter(Mandatory)][string[]]$Modules,
         [Parameter(Mandatory)][string]$RootPath,
+        [Parameter(Mandatory)][string]$ConfigPath,
         [string]$SnapshotTimestamp,
         [switch]$Latest,
         [Parameter(Mandatory)][string]$LogPath,
         [switch]$DecryptOnRestore
     )
 
+    $config = Import-BaselineConfig -Path $ConfigPath
     $snapshotRoot = Resolve-BaselineSnapshotPath -RootPath $RootPath -Timestamp $SnapshotTimestamp -Latest:$Latest
 
     $results = foreach ($moduleName in $Modules) {
@@ -169,8 +171,19 @@ function Invoke-RestoreRun {
         try {
             $restoreFunction = $script:ModuleFunctionMap[$moduleName].Restore
 
+            # BitLocker and LocalAccounts are the only two modules whose
+            # restore can clean up a saved plaintext secret (recovery key /
+            # temporary password) that Apply generated - each needs its own
+            # config section (RecoveryKeyPath / TemporaryPasswordPath) to
+            # know where that secret lives. Every other module's restore is
+            # a pure settings rollback with no config dependency.
             if ($moduleName -eq 'BitLocker') {
-                & $restoreFunction -BackupPath $backupPath -DecryptOnRestore:$DecryptOnRestore
+                & $restoreFunction -BackupPath $backupPath -Config $config[$moduleName] -DecryptOnRestore:$DecryptOnRestore
+            }
+            elseif ($moduleName -eq 'LocalAccounts') {
+                & $restoreFunction -BackupPath $backupPath -Config $config[$moduleName] | Out-Null
+                Write-BaselineLog -Message "Restored module '$moduleName' from '$backupPath'." -LogPath $LogPath
+                [PSCustomObject]@{ Module = $moduleName; Restored = $true }
             }
             else {
                 & $restoreFunction -BackupPath $backupPath | Out-Null
@@ -215,7 +228,7 @@ function Invoke-BaselineRun {
     switch ($Mode) {
         'Audit'   { return Invoke-AuditRun -Modules $Modules -RootPath $RootPath -ConfigPath $ConfigPath -RunTimestamp $RunTimestamp -LogPath $logPath }
         'Apply'   { return Invoke-ApplyRun -Modules $Modules -RootPath $RootPath -ConfigPath $ConfigPath -RunTimestamp $RunTimestamp -LogPath $logPath }
-        'Restore' { return Invoke-RestoreRun -Modules $Modules -RootPath $RootPath -SnapshotTimestamp $SnapshotTimestamp -Latest:$Latest -LogPath $logPath -DecryptOnRestore:$DecryptOnRestore }
+        'Restore' { return Invoke-RestoreRun -Modules $Modules -RootPath $RootPath -ConfigPath $ConfigPath -SnapshotTimestamp $SnapshotTimestamp -Latest:$Latest -LogPath $logPath -DecryptOnRestore:$DecryptOnRestore }
     }
 }
 

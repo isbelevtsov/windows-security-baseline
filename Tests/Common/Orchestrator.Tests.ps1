@@ -42,12 +42,12 @@ BeforeAll {
     function global:Test-BitLockerBaseline { @() }
     function global:Backup-BitLockerSettings { }
     function global:Set-BitLockerBaseline { @() }
-    function global:Restore-BitLockerSettings { param([string]$BackupPath, [switch]$DecryptOnRestore) }
+    function global:Restore-BitLockerSettings { param([string]$BackupPath, [hashtable]$Config, [switch]$DecryptOnRestore) }
 
     function global:Test-LocalAccountsBaseline { @() }
     function global:Backup-LocalAccountsSettings { }
     function global:Set-LocalAccountsBaseline { @() }
-    function global:Restore-LocalAccountsSettings { }
+    function global:Restore-LocalAccountsSettings { param([string]$BackupPath, [hashtable]$Config) }
 }
 
 Describe 'Invoke-BaselineRun elevation check' {
@@ -213,6 +213,14 @@ Describe 'Invoke-BaselineRun -Mode Apply' {
 Describe 'Invoke-BaselineRun -Mode Restore' {
     BeforeEach {
         Mock -ModuleName Orchestrator -CommandName Test-BaselineElevation { $true }
+        Mock -ModuleName Orchestrator -CommandName Import-BaselineConfig {
+            @{
+                PasswordPolicy = @{}; AccountLockout = @{}; Defender = @{}; Firewall = @{}
+                ScreenLock = @{}; AuditPolicy = @{}; RemoteAccess = @{}
+                BitLocker = @{ RecoveryKeyPath = @{ Value = 'C:\Keys' } }
+                LocalAccounts = @{ TemporaryPasswordPath = @{ Value = 'C:\TempPasswords' } }
+            }
+        }
     }
 
     It 'restores every module present in the resolved snapshot' {
@@ -234,7 +242,7 @@ Describe 'Invoke-BaselineRun -Mode Restore' {
         Should -Invoke -ModuleName Orchestrator -CommandName Restore-DefenderSettings -Times 1
     }
 
-    It 'passes -DecryptOnRestore through to the BitLocker module only' {
+    It 'passes -DecryptOnRestore and its config section through to the BitLocker module only' {
         New-Item -Path (Join-Path $TestDrive 'Backups/2026-07-21_150000/BitLocker') -ItemType Directory -Force | Out-Null
         Set-Content -Path (Join-Path $TestDrive 'Backups/2026-07-21_150000/manifest.json') -Value (@{ Timestamp = '2026-07-21_150000'; Mode = 'Apply'; Modules = @('BitLocker'); OSBuild = '22631' } | ConvertTo-Json)
 
@@ -242,6 +250,21 @@ Describe 'Invoke-BaselineRun -Mode Restore' {
 
         Invoke-BaselineRun -Mode 'Restore' -Modules @('BitLocker') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_160000' -SnapshotTimestamp '2026-07-21_150000' -DecryptOnRestore | Out-Null
 
-        Should -Invoke -ModuleName Orchestrator -CommandName Restore-BitLockerSettings -Times 1 -ParameterFilter { $DecryptOnRestore -eq $true }
+        Should -Invoke -ModuleName Orchestrator -CommandName Restore-BitLockerSettings -Times 1 -ParameterFilter {
+            $DecryptOnRestore -eq $true -and $Config.RecoveryKeyPath.Value -eq 'C:\Keys'
+        }
+    }
+
+    It 'passes its config section through to the LocalAccounts module' {
+        New-Item -Path (Join-Path $TestDrive 'Backups/2026-07-21_150000/LocalAccounts') -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $TestDrive 'Backups/2026-07-21_150000/manifest.json') -Value (@{ Timestamp = '2026-07-21_150000'; Mode = 'Apply'; Modules = @('LocalAccounts'); OSBuild = '22631' } | ConvertTo-Json)
+
+        Mock -ModuleName Orchestrator -CommandName Restore-LocalAccountsSettings { }
+
+        Invoke-BaselineRun -Mode 'Restore' -Modules @('LocalAccounts') -RootPath $TestDrive -ConfigPath 'unused.psd1' -RunTimestamp '2026-07-21_160000' -SnapshotTimestamp '2026-07-21_150000' | Out-Null
+
+        Should -Invoke -ModuleName Orchestrator -CommandName Restore-LocalAccountsSettings -Times 1 -ParameterFilter {
+            $Config.TemporaryPasswordPath.Value -eq 'C:\TempPasswords'
+        }
     }
 }

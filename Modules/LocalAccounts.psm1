@@ -113,6 +113,20 @@ function Clear-LocalUserPasswordNeverExpires {
     Set-LocalUser -Name $Name -PasswordNeverExpires $false
 }
 
+function Get-LocalUserPasswordExpired {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    # Confirmed on real hardware: cleared (0) by Windows itself the moment
+    # the account holder completes the forced change-at-next-logon prompt -
+    # not something this module ever has to clear manually. Like UserFlags
+    # (see Get-LocalUserPasswordNeverExpires), ADSI hands this back as a
+    # PropertyValueCollection, not a raw int - casting straight to [int]
+    # throws "Cannot convert ... PropertyValueCollection ... to Int32"; the
+    # actual value needs to be read via .Value first.
+    $user = [ADSI]"WinNT://$env:COMPUTERNAME/$Name,user"
+    return ([int]$user.PasswordExpired.Value -ne 0)
+}
+
 function Get-AutoLogonEnabled {
     [CmdletBinding()]
     param()
@@ -335,7 +349,10 @@ function Set-LocalAccountsBaseline {
 
 function Restore-LocalAccountsSettings {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$BackupPath)
+    param(
+        [Parameter(Mandatory)][string]$BackupPath,
+        [hashtable]$Config
+    )
 
     $statePath = Join-Path -Path $BackupPath -ChildPath 'local-accounts-state.json'
     if (-not (Test-Path -Path $statePath)) {
@@ -361,6 +378,8 @@ function Restore-LocalAccountsSettings {
     # (if it was previously on) will require the password to be re-entered
     # once by hand; that's a deliberate one-way door, not a bug.
 
+    $tempPasswordFolder = $(if ($Config) { Get-BaselineValue -Section $Config -Name 'TemporaryPasswordPath' })
+
     foreach ($user in @($saved.Users)) {
         if ($user.PasswordRequired) {
             Set-LocalUserRequiresPassword -Name $user.Name
@@ -368,6 +387,26 @@ function Restore-LocalAccountsSettings {
         # PasswordRequired = $false is never restored: re-permitting a blank
         # password would be a security regression this toolkit won't perform
         # automatically, even on Restore.
+
+        if (-not $tempPasswordFolder) { continue }
+        $tempPasswordFile = Join-Path -Path $tempPasswordFolder -ChildPath "$($user.Name)-temp-password.txt"
+        if (-not (Test-Path -Path $tempPasswordFile)) { continue }
+
+        # A saved temporary password file is only still meaningful while the
+        # account both requires a password and is still waiting on its
+        # forced change. Once either stops being true - the account is back
+        # to allowing a blank password, or the account holder already
+        # completed the change (Windows itself clears PasswordExpired the
+        # moment that happens, see Get-LocalUserPasswordExpired) - the
+        # file's contents are stale, so remove it rather than leave another
+        # plaintext secret sitting on disk.
+        $currentUser = Get-LocalUser -Name $user.Name -ErrorAction SilentlyContinue
+        $restoredToEmptyPassword = ($currentUser) -and (-not $currentUser.PasswordRequired)
+        $alreadyChangedByUser = ($currentUser) -and (-not (Get-LocalUserPasswordExpired -Name $user.Name))
+
+        if ($restoredToEmptyPassword -or $alreadyChangedByUser) {
+            Remove-Item -Path $tempPasswordFile -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 

@@ -330,3 +330,95 @@ Describe 'Backup-LocalAccountsSettings / Restore-LocalAccountsSettings' {
         { Restore-LocalAccountsSettings -BackupPath (Join-Path $TestDrive 'missing') } | Should -Throw
     }
 }
+
+Describe 'Restore-LocalAccountsSettings temporary password cleanup' {
+    BeforeEach {
+        InModuleScope -ModuleName LocalAccounts {
+            Mock -CommandName Set-ItemProperty { }
+            Mock -CommandName Remove-ItemProperty { }
+        }
+        Mock -ModuleName LocalAccounts -CommandName Set-LocalUserRequiresPassword { }
+    }
+
+    It 'deletes the temporary password file when the account is back to not requiring a password' {
+        $config = New-TestConfig
+        New-Item -Path $config.TemporaryPasswordPath.Value -ItemType Directory -Force | Out-Null
+        $tempFile = Join-Path $config.TemporaryPasswordPath.Value 'alice-temp-password.txt'
+        Set-Content -Path $tempFile -Value 'S0meTemp!Pass'
+
+        $backupPath = Join-Path $TestDrive 'LocalAccountsCleanupEmpty'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        [PSCustomObject]@{
+            AutoAdminLogonExisted = $false; AutoAdminLogonValue = $null
+            DefaultUserNameExisted = $false; DefaultUserNameValue = $null
+            DefaultDomainNameExisted = $false; DefaultDomainNameValue = $null
+            Users = @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
+        } | ConvertTo-Json | Set-Content -Path (Join-Path $backupPath 'local-accounts-state.json')
+
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUser { [PSCustomObject]@{ Name = 'alice'; PasswordRequired = $false } }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordExpired { $true }
+
+        Restore-LocalAccountsSettings -BackupPath $backupPath -Config $config
+
+        Test-Path -Path $tempFile | Should -BeFalse
+    }
+
+    It 'deletes the temporary password file once the account holder has already changed it' {
+        $config = New-TestConfig
+        New-Item -Path $config.TemporaryPasswordPath.Value -ItemType Directory -Force | Out-Null
+        $tempFile = Join-Path $config.TemporaryPasswordPath.Value 'alice-temp-password.txt'
+        Set-Content -Path $tempFile -Value 'S0meTemp!Pass'
+
+        $backupPath = Join-Path $TestDrive 'LocalAccountsCleanupChanged'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        [PSCustomObject]@{
+            AutoAdminLogonExisted = $false; AutoAdminLogonValue = $null
+            DefaultUserNameExisted = $false; DefaultUserNameValue = $null
+            DefaultDomainNameExisted = $false; DefaultDomainNameValue = $null
+            Users = @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
+        } | ConvertTo-Json | Set-Content -Path (Join-Path $backupPath 'local-accounts-state.json')
+
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUser { [PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true } }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordExpired { $false }
+
+        Restore-LocalAccountsSettings -BackupPath $backupPath -Config $config
+
+        Test-Path -Path $tempFile | Should -BeFalse
+    }
+
+    It 'keeps the temporary password file while the account still requires a password and the change is still pending' {
+        $config = New-TestConfig
+        New-Item -Path $config.TemporaryPasswordPath.Value -ItemType Directory -Force | Out-Null
+        $tempFile = Join-Path $config.TemporaryPasswordPath.Value 'alice-temp-password.txt'
+        Set-Content -Path $tempFile -Value 'S0meTemp!Pass'
+
+        $backupPath = Join-Path $TestDrive 'LocalAccountsCleanupPending'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        [PSCustomObject]@{
+            AutoAdminLogonExisted = $false; AutoAdminLogonValue = $null
+            DefaultUserNameExisted = $false; DefaultUserNameValue = $null
+            DefaultDomainNameExisted = $false; DefaultDomainNameValue = $null
+            Users = @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
+        } | ConvertTo-Json | Set-Content -Path (Join-Path $backupPath 'local-accounts-state.json')
+
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUser { [PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true } }
+        Mock -ModuleName LocalAccounts -CommandName Get-LocalUserPasswordExpired { $true }
+
+        Restore-LocalAccountsSettings -BackupPath $backupPath -Config $config
+
+        Test-Path -Path $tempFile | Should -BeTrue
+    }
+
+    It 'does not attempt cleanup when -Config is not supplied' {
+        $backupPath = Join-Path $TestDrive 'LocalAccountsCleanupNoConfig'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        [PSCustomObject]@{
+            AutoAdminLogonExisted = $false; AutoAdminLogonValue = $null
+            DefaultUserNameExisted = $false; DefaultUserNameValue = $null
+            DefaultDomainNameExisted = $false; DefaultDomainNameValue = $null
+            Users = @([PSCustomObject]@{ Name = 'alice'; PasswordRequired = $true })
+        } | ConvertTo-Json | Set-Content -Path (Join-Path $backupPath 'local-accounts-state.json')
+
+        { Restore-LocalAccountsSettings -BackupPath $backupPath } | Should -Not -Throw
+    }
+}

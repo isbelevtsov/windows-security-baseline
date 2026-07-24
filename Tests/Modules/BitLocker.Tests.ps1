@@ -372,4 +372,47 @@ Describe 'Restore-BitLockerSettings' {
         $result.Restored | Should -BeTrue
         Should -Invoke -ModuleName BitLocker -CommandName Disable-OsDriveBitLocker -Times 0
     }
+
+    It 'deletes the saved recovery key file once decryption succeeds' {
+        Mock -ModuleName BitLocker -CommandName Disable-OsDriveBitLocker { }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ VolumeStatus = 'FullyEncrypted' } }
+        $config = New-TestConfig
+        New-Item -Path $config.RecoveryKeyPath.Value -ItemType Directory -Force | Out-Null
+        $keyFile = Join-Path $config.RecoveryKeyPath.Value 'C-recovery-key.txt'
+        Set-Content -Path $keyFile -Value 'some-recovery-key'
+        $backupPath = Join-Path $TestDrive 'BitLockerBackupCleanup'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $backupPath 'bitlocker-state.json') -Value (@{ ProtectionStatus = 'Off' } | ConvertTo-Json)
+
+        $result = Restore-BitLockerSettings -BackupPath $backupPath -Config $config -DecryptOnRestore
+
+        $result.Restored | Should -BeTrue
+        Test-Path -Path $keyFile | Should -BeFalse
+    }
+
+    It 'keeps the saved recovery key file when decryption throws' {
+        Mock -ModuleName BitLocker -CommandName Disable-OsDriveBitLocker { throw 'decryption failed' }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ VolumeStatus = 'FullyEncrypted' } }
+        $config = New-TestConfig
+        New-Item -Path $config.RecoveryKeyPath.Value -ItemType Directory -Force | Out-Null
+        $keyFile = Join-Path $config.RecoveryKeyPath.Value 'C-recovery-key.txt'
+        Set-Content -Path $keyFile -Value 'some-recovery-key'
+        $backupPath = Join-Path $TestDrive 'BitLockerBackupCleanupFailure'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $backupPath 'bitlocker-state.json') -Value (@{ ProtectionStatus = 'Off' } | ConvertTo-Json)
+
+        { Restore-BitLockerSettings -BackupPath $backupPath -Config $config -DecryptOnRestore } | Should -Throw
+
+        Test-Path -Path $keyFile | Should -BeTrue
+    }
+
+    It 'does not attempt cleanup when -Config is not supplied' {
+        Mock -ModuleName BitLocker -CommandName Disable-OsDriveBitLocker { }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ VolumeStatus = 'FullyEncrypted' } }
+        $backupPath = Join-Path $TestDrive 'BitLockerBackupNoConfig'
+        New-Item -Path $backupPath -ItemType Directory -Force | Out-Null
+        Set-Content -Path (Join-Path $backupPath 'bitlocker-state.json') -Value (@{ ProtectionStatus = 'Off' } | ConvertTo-Json)
+
+        { Restore-BitLockerSettings -BackupPath $backupPath -DecryptOnRestore } | Should -Not -Throw
+    }
 }
