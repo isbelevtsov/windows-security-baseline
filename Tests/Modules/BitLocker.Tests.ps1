@@ -32,6 +32,14 @@ Describe 'Test-BitLockerBaseline' {
 }
 
 Describe 'Enable-OsDriveBitLocker' {
+    BeforeEach {
+        # Mocked so every existing test in this Describe doesn't invoke the
+        # real Resume-BitLocker cmdlet against this machine's actual system
+        # drive - tests that specifically care about this call mock/assert
+        # it themselves below.
+        Mock -ModuleName BitLocker -CommandName Resume-OsDriveBitLocker { }
+    }
+
     It 'activates with RecoveryPasswordProtector only, without attempting to add a TPM protector, when a TPM protector already exists' {
         # Regression test for a real Windows 11 Pro failure: requesting -TpmProtector
         # when one already exists throws "Only one key protector of this type is
@@ -173,6 +181,36 @@ Describe 'Enable-OsDriveBitLocker' {
 
         $result | Should -BeTrue
         Should -Invoke -ModuleName BitLocker -CommandName Add-OsDriveRecoveryPasswordProtector -Times 0
+    }
+
+    It 'attempts to resume BitLocker protection after configuring protectors' {
+        # Regression test for a real finding: a volume can sit at 100%
+        # encrypted with valid TPM + recovery password protectors and still
+        # show ProtectionStatus "Off" - manage-bde's text output doesn't
+        # distinguish a suspended protection state from one that was never
+        # activated, but Resume-BitLocker immediately flipped it to "On" on
+        # real hardware. This must be attempted every time, regardless of
+        # which protector path was taken.
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @() }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector { }
+        Mock -ModuleName BitLocker -CommandName Add-OsDriveRecoveryPasswordProtector { }
+
+        InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' } | Out-Null
+
+        Should -Invoke -ModuleName BitLocker -CommandName Resume-OsDriveBitLocker -Times 1
+    }
+
+    It 'does not propagate an error when Resume-BitLocker fails' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume {
+            [PSCustomObject]@{ KeyProtector = @() }
+        }
+        Mock -ModuleName BitLocker -CommandName Invoke-EnableBitLockerWithTpmProtector { }
+        Mock -ModuleName BitLocker -CommandName Add-OsDriveRecoveryPasswordProtector { }
+        Mock -ModuleName BitLocker -CommandName Resume-OsDriveBitLocker { throw 'not in a resumable state' }
+
+        { InModuleScope -ModuleName BitLocker { Enable-OsDriveBitLocker -EncryptionMethod 'XtsAes256' } } | Should -Not -Throw
     }
 }
 

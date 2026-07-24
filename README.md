@@ -12,9 +12,9 @@ Defender/NetSecurity/BitLocker/LocalAccounts cmdlets) mocked in the test
 suite. Since then, `-Mode Audit`, `-Mode Apply`, and `-Mode Restore -Latest`
 have each been run for real on a Windows Pro test VM (see
 [`docs/MANUAL-VALIDATION.md`](docs/MANUAL-VALIDATION.md) Findings for the
-bugs that surfaced and were fixed as a result). **Windows 11 Home has not yet
-been validated**, and BitLocker activation timing on slow/virtual storage is
-still an open question (see the Findings entries). Run through
+bugs that surfaced and were fixed as a result), including BitLocker reaching
+`ProtectionStatus = On` and staying there across repeated idempotent Apply
+runs. **Windows 11 Home has not yet been validated.** Run through
 `docs/MANUAL-VALIDATION.md` on a Home device, and on any device meaningfully
 different from what's already covered, before relying on this in production.
 

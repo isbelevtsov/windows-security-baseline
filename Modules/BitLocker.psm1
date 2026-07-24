@@ -44,6 +44,12 @@ function Test-OsDriveHasRecoveryPasswordProtector {
     return ($types -contains 'RecoveryPassword')
 }
 
+function Resume-OsDriveBitLocker {
+    [CmdletBinding()]
+    param()
+    Resume-BitLocker -MountPoint $env:SystemDrive
+}
+
 function Enable-OsDriveBitLocker {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$EncryptionMethod)
@@ -72,6 +78,7 @@ function Enable-OsDriveBitLocker {
     # Every fallback below now re-checks for an existing RecoveryPassword
     # protector before adding another one.
     $existingProtectorTypes = @((Get-OsDriveBitLockerVolume).KeyProtector | Select-Object -ExpandProperty KeyProtectorType)
+    $tpmProtectorAdded = $true
 
     if ($existingProtectorTypes -contains 'Tpm') {
         try {
@@ -82,30 +89,47 @@ function Enable-OsDriveBitLocker {
                 Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
             }
         }
-        return $true
     }
-
-    try {
-        Invoke-EnableBitLockerWithTpmProtector -EncryptionMethod $EncryptionMethod | Out-Null
-        if (-not (Test-OsDriveHasRecoveryPasswordProtector)) {
-            Add-OsDriveRecoveryPasswordProtector | Out-Null
-        }
-        return $true
-    }
-    catch {
-        if (Test-OsDriveHasRecoveryPasswordProtector) {
-            return $false
-        }
+    else {
         try {
-            Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
-        }
-        catch {
+            Invoke-EnableBitLockerWithTpmProtector -EncryptionMethod $EncryptionMethod | Out-Null
             if (-not (Test-OsDriveHasRecoveryPasswordProtector)) {
-                Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
+                Add-OsDriveRecoveryPasswordProtector | Out-Null
             }
         }
-        return $false
+        catch {
+            $tpmProtectorAdded = $false
+            if (-not (Test-OsDriveHasRecoveryPasswordProtector)) {
+                try {
+                    Invoke-EnableBitLockerWithRecoveryPasswordProtector -EncryptionMethod $EncryptionMethod | Out-Null
+                }
+                catch {
+                    Invoke-EnableBitLockerWithRecoveryPasswordProtectorOnly | Out-Null
+                }
+            }
+        }
     }
+
+    # Enable-BitLocker/Add-BitLockerKeyProtector can leave protection
+    # suspended rather than actually turned on, particularly on a volume
+    # where Windows' automatic "Device Encryption" already started
+    # encrypting before this ever ran. Confirmed on real hardware: a volume
+    # sitting at 100% encrypted with valid TPM + recovery password
+    # protectors still showed ProtectionStatus "Off" - manage-bde's text
+    # output doesn't distinguish "suspended" from "never activated" here
+    # (it just says "Protection Off" either way), but Resume-BitLocker
+    # immediately flipped it to "On". This is a best-effort nudge, not
+    # something every code path above is guaranteed to leave in a
+    # resumable state, so failures here are not fatal to the overall
+    # Apply - Test-BitLockerBaseline's post-apply verification will still
+    # catch it if this doesn't work.
+    try {
+        Resume-OsDriveBitLocker | Out-Null
+    }
+    catch {
+    }
+
+    return $tpmProtectorAdded
 }
 
 function Disable-OsDriveBitLocker {

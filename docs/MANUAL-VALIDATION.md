@@ -67,11 +67,13 @@ BitLocker for real.
       the test VM). A recovery key `.txt` file exists under
       `C:\ProgramData\SecurityBaseline\RecoveryKeys\`.
       **If the log still shows a Warn "Post-apply verification failed" for
-      `OSDriveEncrypted`** after the TPM-protector fix (see Findings below),
-      **restart the machine** and re-run `-Mode Audit -Modules BitLocker` — BitLocker
-      on the OS drive is known to sometimes require a reboot to fully activate
-      protection even with a proper protector configured, and this hasn't yet been
-      confirmed one way or the other on real hardware.
+      `OSDriveEncrypted`**, check `manage-bde -status C:` for
+      `Percentage Encrypted: 100.0%` with `Protection Status: Protection Off` -
+      this combination means protection is suspended, not never-activated (see
+      Findings below); `Enable-OsDriveBitLocker` now calls `Resume-BitLocker`
+      automatically to handle exactly this, but if it's still stuck after an
+      `Apply` run, try `Resume-BitLocker -MountPoint C:` by hand and share the
+      result.
 - [ ] Re-run `.\Invoke-SecurityBaseline.ps1 -Mode Apply` immediately again — the log
       for the second run shows `Changed=False` for every setting (idempotency).
 
@@ -464,3 +466,50 @@ password and confirm the change prompt actually appears before trusting
 this is done. If it still doesn't prompt, capture the account's raw
 `UserFlags` value and the nearest Security event 4624 right after that
 attempt, the same way this entry did.
+
+**Confirmed by an actual interactive logon**: logged the `user` account out
+and back in with the temporary password - Windows prompted to change it,
+as intended. `PasswordLastSet` moved to the time of that logon,
+`PasswordExpired` read back `0` afterward (cleared because the change was
+actually completed this time, not silently bypassed), and `UserFlags`
+settled at a clean `0x201` (no `PASSWD_NOTREQD`, no `DONT_EXPIRE_PASSWD`,
+no `PASSWORD_EXPIRED`). The temporary password file was deleted afterward
+per its own instructions, once confirmed no longer needed.
+
+### 2026-07-23 — same VM, third follow-up: BitLocker "100% encrypted, Protection Off" resolved
+
+The open question from every earlier BitLocker entry above - why
+`ProtectionStatus` stayed `Off` even once the volume finished converting -
+is now resolved. On this VM, `Get-BitLockerVolume` showed
+`VolumeStatus = FullyEncrypted`, `EncryptionPercentage = 100`, valid `Tpm`
++ multiple `RecoveryPassword` protectors, and yet `ProtectionStatus = Off`.
+`manage-bde -status` doesn't distinguish a **suspended** protection state
+from one that was **never activated** - both print as plain
+"Protection Off" - which is exactly why this went unnoticed for so long.
+Running `Resume-BitLocker -MountPoint C:` directly flipped
+`ProtectionStatus` to `On` immediately, with no other change needed.
+
+Root cause (most likely): this volume's OS-drive encryption was originally
+started by Windows' automatic "Device Encryption" (see the very first
+BitLocker findings entry above), and every subsequent `Enable-BitLocker`/
+`Add-BitLockerKeyProtector` call this module made on top of that
+pre-existing state - across several Apply runs while diagnosing the
+earlier TPM-protector and duplicate-protector bugs - left protection in a
+suspended rather than active state, without ever surfacing an error to
+say so.
+
+Fixed in `Modules/BitLocker.psm1`: `Enable-OsDriveBitLocker` now always
+calls a new `Resume-OsDriveBitLocker` (`Resume-BitLocker -MountPoint
+$env:SystemDrive`) as its final step, after configuring protectors,
+regardless of which code path was taken. This is deliberately best-effort
+- failures are swallowed, since `Test-BitLockerBaseline`'s post-apply
+verification already catches and reports it if protection still isn't
+`On` afterward.
+
+Verified for real via the actual toolkit (not just the direct cmdlet
+call above): `.\Invoke-SecurityBaseline.ps1 -Mode Audit -Modules
+BitLocker` now shows `Pass = True` for `OSDriveEncrypted` - the first
+time in this project's real-hardware validation history that BitLocker
+has reported fully compliant - and a follow-up `-Mode Apply` shows
+`0 setting(s) changed`, confirming it stays compliant and idempotent
+rather than needlessly re-attempting protector setup on every run.
