@@ -3,8 +3,8 @@
 param(
     [Parameter(Mandatory)][ValidateSet('Audit', 'Apply', 'Restore')][string]$Mode,
 
-    [ValidateSet('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts')]
-    [string[]]$Modules = @('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts'),
+    [ValidateSet('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts', 'WindowsUpdate', 'PowerShellLogging', 'RemovableStorage', 'UAC', 'NetworkHardening', 'EventLogRetention')]
+    [string[]]$Modules = @('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts', 'WindowsUpdate', 'PowerShellLogging', 'RemovableStorage', 'UAC', 'NetworkHardening', 'EventLogRetention'),
 
     [string]$RootPath = 'C:\ProgramData\SecurityBaseline',
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'Config\Baseline.config.psd1'),
@@ -31,6 +31,12 @@ $moduleFiles = @(
     'Modules\RemoteAccess.psm1'
     'Modules\BitLocker.psm1'
     'Modules\LocalAccounts.psm1'
+    'Modules\WindowsUpdate.psm1'
+    'Modules\PowerShellLogging.psm1'
+    'Modules\RemovableStorage.psm1'
+    'Modules\UAC.psm1'
+    'Modules\NetworkHardening.psm1'
+    'Modules\EventLogRetention.psm1'
 )
 
 foreach ($file in $moduleFiles) {

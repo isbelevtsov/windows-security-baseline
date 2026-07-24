@@ -76,6 +76,21 @@ BitLocker for real.
       result.
 - [ ] Re-run `.\Invoke-SecurityBaseline.ps1 -Mode Apply` immediately again — the log
       for the second run shows `Changed=False` for every setting (idempotency).
+- [ ] `Get-Service wuauserv` shows `StartType` not `Disabled`, and
+      `HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU` shows
+      `NoAutoUpdate = 0`, `AUOptions = 4`.
+- [ ] `HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging`
+      shows `EnableScriptBlockLogging = 1`, and
+      `C:\ProgramData\SecurityBaseline\PowerShellTranscripts` exists.
+- [ ] `HKLM:\SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices\{53f5630d-b6bf-11d0-94f2-00a0c91efb8b}`
+      shows `Deny_All = 1`; plugging in a USB drive shows access denied.
+- [ ] `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System` shows
+      `ConsentPromptBehaviorAdmin = 2`.
+- [ ] `HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\LmCompatibilityLevel` is `5`,
+      and `HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\EnableMulticast`
+      is `0`.
+- [ ] `(Get-WinEvent -ListLog Application/Security/System).MaximumSizeInBytes`
+      is at least `104857600` for all three logs.
 
 ## Restore mode
 
@@ -625,3 +640,42 @@ Verified for real: re-ran `-Mode Apply -Modules BitLocker` after the fix
 `Conversion Status: Encryption in Progress`, `53.8%`, a real `Tpm`
 protector successfully added (no TPM-fallback note this time), using
 `XTS-AES 256` as configured.
+
+### 2026-07-23 — same VM, six new modules added: WindowsUpdate, PowerShellLogging, RemovableStorage, UAC, NetworkHardening, EventLogRetention
+
+Added six new modules covering gaps identified when asked "did I miss any
+settings?" — Windows Update policy, PowerShell script block/module/
+transcription logging, removable storage lockdown, UAC prompt behavior,
+NTLM/LLMNR network hardening, and event log retention size. All follow the
+existing `Test-`/`Backup-`/`Set-`/`Restore-<Area>Baseline` contract, are
+config-driven via `Config/Baseline.config.psd1`, and ship with Pester
+coverage (47 new tests, mocked at the registry-wrapper level).
+
+Verified for real against this VM, full cycle, no bugs found this round:
+
+- **Fresh Audit**: all 18 settings read correctly, including genuine
+  Windows-default values on an unconfigured machine (`LmCompatibilityLevel
+  = 3`, `ConsentPromptBehaviorAdmin = 5`, event logs at the default 20 MiB)
+  — confirming the "absent registry value = Windows' own compliant
+  default" design for `WindowsUpdate`/`NetworkHardening` doesn't
+  misreport a stock machine as non-compliant.
+- **Apply**: `12 setting(s) changed`, `LASTEXITCODE 0`, no errors. The 6
+  settings already compliant out of the box (`WindowsUpdate` x4,
+  `UAC.EnableLUA`, `UAC.PromptOnSecureDesktop`) correctly reported
+  `Changed=False`.
+- **Idempotency**: immediate re-`Apply` reported `0 setting(s) changed`
+  across all 18 settings.
+- **Direct spot-checks** (not just re-running the toolkit's own `Audit`):
+  `Get-ItemProperty ... ScriptBlockLogging` key present, `wevtutil`-backed
+  `(Get-WinEvent -ListLog Security).MaximumSizeInBytes` read `104857600`,
+  `(Get-Service wuauserv).StartType` read `Manual` (not `Disabled`) — all
+  matched what the toolkit reported.
+- **Restore**: reverted all 12 changed settings back to their pre-`Apply`
+  values (confirmed via a post-Restore `Audit` showing `12 setting(s)
+  failed` plus the same direct spot-checks — `LmCompatibilityLevel` back
+  to `3`, Security log back to `20971520` bytes, `wuauserv` back to
+  `Manual`), then re-`Apply`d to leave the machine in its hardened state.
+
+No new bugs surfaced this round — first module addition in this project's
+real-hardware validation history to go from Audit through Apply,
+idempotency, and Restore with nothing to fix.

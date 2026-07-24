@@ -5,18 +5,27 @@ Import-Module (Join-Path $PSScriptRoot 'BackupRestore.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Reporting.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Logging.psm1') -Force
 
-$script:AllModules = @('PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts')
+$script:AllModules = @(
+    'PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall', 'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts',
+    'WindowsUpdate', 'PowerShellLogging', 'RemovableStorage', 'UAC', 'NetworkHardening', 'EventLogRetention'
+)
 
 $script:ModuleFunctionMap = @{
-    PasswordPolicy = @{ Test = 'Test-PasswordPolicyBaseline'; Backup = 'Backup-PasswordPolicySettings'; Set = 'Set-PasswordPolicyBaseline'; Restore = 'Restore-PasswordPolicySettings' }
-    AccountLockout = @{ Test = 'Test-AccountLockoutBaseline'; Backup = 'Backup-AccountLockoutSettings'; Set = 'Set-AccountLockoutBaseline'; Restore = 'Restore-AccountLockoutSettings' }
-    Defender       = @{ Test = 'Test-DefenderBaseline';       Backup = 'Backup-DefenderSettings';       Set = 'Set-DefenderBaseline';       Restore = 'Restore-DefenderSettings' }
-    Firewall       = @{ Test = 'Test-FirewallBaseline';       Backup = 'Backup-FirewallSettings';       Set = 'Set-FirewallBaseline';       Restore = 'Restore-FirewallSettings' }
-    ScreenLock     = @{ Test = 'Test-ScreenLockBaseline';     Backup = 'Backup-ScreenLockSettings';     Set = 'Set-ScreenLockBaseline';     Restore = 'Restore-ScreenLockSettings' }
-    AuditPolicy    = @{ Test = 'Test-AuditPolicyBaseline';    Backup = 'Backup-AuditPolicySettings';    Set = 'Set-AuditPolicyBaseline';    Restore = 'Restore-AuditPolicySettings' }
-    RemoteAccess   = @{ Test = 'Test-RemoteAccessBaseline';   Backup = 'Backup-RemoteAccessSettings';   Set = 'Set-RemoteAccessBaseline';   Restore = 'Restore-RemoteAccessSettings' }
-    BitLocker      = @{ Test = 'Test-BitLockerBaseline';      Backup = 'Backup-BitLockerSettings';      Set = 'Set-BitLockerBaseline';      Restore = 'Restore-BitLockerSettings' }
-    LocalAccounts  = @{ Test = 'Test-LocalAccountsBaseline';  Backup = 'Backup-LocalAccountsSettings';  Set = 'Set-LocalAccountsBaseline';  Restore = 'Restore-LocalAccountsSettings' }
+    PasswordPolicy    = @{ Test = 'Test-PasswordPolicyBaseline';    Backup = 'Backup-PasswordPolicySettings';    Set = 'Set-PasswordPolicyBaseline';    Restore = 'Restore-PasswordPolicySettings' }
+    AccountLockout    = @{ Test = 'Test-AccountLockoutBaseline';    Backup = 'Backup-AccountLockoutSettings';    Set = 'Set-AccountLockoutBaseline';    Restore = 'Restore-AccountLockoutSettings' }
+    Defender          = @{ Test = 'Test-DefenderBaseline';          Backup = 'Backup-DefenderSettings';          Set = 'Set-DefenderBaseline';          Restore = 'Restore-DefenderSettings' }
+    Firewall          = @{ Test = 'Test-FirewallBaseline';          Backup = 'Backup-FirewallSettings';          Set = 'Set-FirewallBaseline';          Restore = 'Restore-FirewallSettings' }
+    ScreenLock        = @{ Test = 'Test-ScreenLockBaseline';        Backup = 'Backup-ScreenLockSettings';        Set = 'Set-ScreenLockBaseline';        Restore = 'Restore-ScreenLockSettings' }
+    AuditPolicy       = @{ Test = 'Test-AuditPolicyBaseline';       Backup = 'Backup-AuditPolicySettings';       Set = 'Set-AuditPolicyBaseline';       Restore = 'Restore-AuditPolicySettings' }
+    RemoteAccess      = @{ Test = 'Test-RemoteAccessBaseline';      Backup = 'Backup-RemoteAccessSettings';      Set = 'Set-RemoteAccessBaseline';      Restore = 'Restore-RemoteAccessSettings' }
+    BitLocker         = @{ Test = 'Test-BitLockerBaseline';         Backup = 'Backup-BitLockerSettings';         Set = 'Set-BitLockerBaseline';         Restore = 'Restore-BitLockerSettings' }
+    LocalAccounts     = @{ Test = 'Test-LocalAccountsBaseline';     Backup = 'Backup-LocalAccountsSettings';     Set = 'Set-LocalAccountsBaseline';     Restore = 'Restore-LocalAccountsSettings' }
+    WindowsUpdate     = @{ Test = 'Test-WindowsUpdateBaseline';     Backup = 'Backup-WindowsUpdateSettings';     Set = 'Set-WindowsUpdateBaseline';     Restore = 'Restore-WindowsUpdateSettings' }
+    PowerShellLogging = @{ Test = 'Test-PowerShellLoggingBaseline'; Backup = 'Backup-PowerShellLoggingSettings'; Set = 'Set-PowerShellLoggingBaseline'; Restore = 'Restore-PowerShellLoggingSettings' }
+    RemovableStorage  = @{ Test = 'Test-RemovableStorageBaseline';  Backup = 'Backup-RemovableStorageSettings';  Set = 'Set-RemovableStorageBaseline';  Restore = 'Restore-RemovableStorageSettings' }
+    UAC               = @{ Test = 'Test-UACBaseline';               Backup = 'Backup-UACSettings';               Set = 'Set-UACBaseline';               Restore = 'Restore-UACSettings' }
+    NetworkHardening  = @{ Test = 'Test-NetworkHardeningBaseline';  Backup = 'Backup-NetworkHardeningSettings';  Set = 'Set-NetworkHardeningBaseline';  Restore = 'Restore-NetworkHardeningSettings' }
+    EventLogRetention = @{ Test = 'Test-EventLogRetentionBaseline'; Backup = 'Backup-EventLogRetentionSettings'; Set = 'Set-EventLogRetentionBaseline'; Restore = 'Restore-EventLogRetentionSettings' }
 }
 
 $script:SeceditModules = @('PasswordPolicy', 'AccountLockout')

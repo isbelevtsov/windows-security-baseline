@@ -18,15 +18,21 @@ Describe 'Import-BaselineConfig' {
         $path = Join-Path $TestDrive 'full.psd1'
         Set-Content -Path $path -Value @'
 @{
-    PasswordPolicy = @{ MinimumPasswordLength = @{ Value = 14; Description = "min length" } }
-    AccountLockout = @{}
-    Defender       = @{}
-    Firewall       = @{}
-    ScreenLock     = @{}
-    AuditPolicy    = @{}
-    RemoteAccess   = @{}
-    BitLocker      = @{}
-    LocalAccounts  = @{}
+    PasswordPolicy    = @{ MinimumPasswordLength = @{ Value = 14; Description = "min length" } }
+    AccountLockout    = @{}
+    Defender          = @{}
+    Firewall          = @{}
+    ScreenLock        = @{}
+    AuditPolicy       = @{}
+    RemoteAccess      = @{}
+    BitLocker         = @{}
+    LocalAccounts     = @{}
+    WindowsUpdate     = @{}
+    PowerShellLogging = @{}
+    RemovableStorage  = @{}
+    UAC               = @{}
+    NetworkHardening  = @{}
+    EventLogRetention = @{}
 }
 '@
         $config = Import-BaselineConfig -Path $path
@@ -38,6 +44,12 @@ Describe 'Import-BaselineConfig' {
         $config.PasswordPolicy.MinimumPasswordLength.Value | Should -Be 14
         $config.RemoteAccess.DisableRDP.Value | Should -Be $true
         $config.LocalAccounts.DisableAutoLogon.Value | Should -Be $true
+        $config.WindowsUpdate.AutomaticUpdatesEnabled.Value | Should -Be $true
+        $config.PowerShellLogging.EnableScriptBlockLogging.Value | Should -Be $true
+        $config.RemovableStorage.DenyAllAccess.Value | Should -Be $true
+        $config.UAC.EnableLUA.Value | Should -Be $true
+        $config.NetworkHardening.LmCompatibilityLevel.Value | Should -Be 5
+        $config.EventLogRetention.MinimumMaxSizeBytes.Value | Should -Be 104857600
     }
 }
 

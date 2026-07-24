@@ -1,6 +1,7 @@
 $script:RequiredSections = @(
     'PasswordPolicy', 'AccountLockout', 'Defender', 'Firewall',
-    'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts'
+    'ScreenLock', 'AuditPolicy', 'RemoteAccess', 'BitLocker', 'LocalAccounts',
+    'WindowsUpdate', 'PowerShellLogging', 'RemovableStorage', 'UAC', 'NetworkHardening', 'EventLogRetention'
 )
 
 function Import-BaselineConfig {

@@ -126,4 +126,68 @@
             Description = "Clears the 'Password never expires' flag on every enabled local account. Confirmed on real hardware: an account with this flag set silently defeats any forced 'must change password at next logon' action on that same account - Windows lets the logon through and clears the must-change flag without ever prompting - so it has to be checked and cleared independently of whatever else is being remediated on the account."
         }
     }
+    WindowsUpdate = @{
+        AutomaticUpdatesEnabled = @{
+            Value       = $true
+            Description = "Ensures automatic updates aren't disabled via policy (NoAutoUpdate=0). An unpatched machine undermines every other control in this baseline, so this is enforced explicitly rather than relying on whatever a user last set in Settings."
+        }
+        DeferQualityUpdatesDays = @{
+            Value       = 0
+            Description = "Maximum days security/quality updates may be deferred (DeferQualityUpdatesPeriodInDays). 0 means install as soon as available - feature updates aren't covered by this setting since they're a stability/operational tradeoff rather than a security one, but quality updates carry security fixes and shouldn't sit unpatched."
+        }
+    }
+    PowerShellLogging = @{
+        EnableScriptBlockLogging = @{
+            Value       = $true
+            Description = "Logs the full text of executed PowerShell script blocks (including deobfuscated content) to the PowerShell/Operational event log - the single highest-value PowerShell audit setting, since it's what actually shows what a script or attacker ran, not just that PowerShell was launched."
+        }
+        EnableModuleLogging = @{
+            Value       = $true
+            Description = "Logs pipeline execution details for PowerShell modules/snap-ins to the event log, scoped to all modules (see ModuleLoggingCoversAllModules)."
+        }
+        EnableTranscription = @{
+            Value       = $true
+            Description = "Writes a transcript of every PowerShell session (commands and output) to TranscriptOutputPath, independent of and complementary to script block logging."
+        }
+        TranscriptOutputPath = @{
+            Value       = 'C:\ProgramData\SecurityBaseline\PowerShellTranscripts'
+            Description = "Local folder where PowerShell session transcripts are written when EnableTranscription is on."
+        }
+    }
+    RemovableStorage = @{
+        DenyAllAccess = @{
+            Value       = $true
+            Description = "Blocks read/write/execute access to removable disks (USB mass storage) system-wide, not just auditing attempts at it (see AuditPolicy's 'Removable Storage' subcategory) - reduces the most common PHI exfiltration and malware-introduction path on a standalone device with no DLP tooling."
+        }
+    }
+    UAC = @{
+        EnableLUA = @{
+            Value       = $true
+            Description = "Keeps User Account Control itself turned on. Disabling this entirely removes UAC's split-token/elevation model, so every other Windows security boundary that assumes a non-elevated default session no longer applies."
+        }
+        ConsentPromptBehaviorAdmin = @{
+            Value       = 2
+            Description = "Requires administrators to consent to elevation on the secure desktop (2 = 'Prompt for consent on the secure desktop') rather than silently elevating (0) or prompting on the regular, spoofable desktop."
+        }
+        PromptOnSecureDesktop = @{
+            Value       = $true
+            Description = "Ensures the UAC consent/credential prompt itself renders on the secure desktop, where other processes can't inject input or overlay a fake prompt."
+        }
+    }
+    NetworkHardening = @{
+        LmCompatibilityLevel = @{
+            Value       = 5
+            Description = "Minimum acceptable LmCompatibilityLevel (0-5 scale; 5 = 'Send NTLMv2 response only, refuse LM and NTLM'). Rejects the legacy LM and NTLMv1 authentication protocols, both trivially crackable/relayable, while still allowing NTLMv2 for compatibility with non-Kerberos scenarios on a workgroup device."
+        }
+        DisableLLMNR = @{
+            Value       = $true
+            Description = "Disables Link-Local Multicast Name Resolution (LLMNR). LLMNR falls back to multicast DNS-style name resolution on the local subnet, which is spoofable by anyone else on the network (LLMNR/NBT-NS poisoning) to harvest NTLM hashes."
+        }
+    }
+    EventLogRetention = @{
+        MinimumMaxSizeBytes = @{
+            Value       = 104857600
+            Description = "Minimum maximum-size (100 MB) for the Application, Security, and System event logs. Windows' small default sizes (as low as 20 MB for Security) can roll over and silently discard audit history within hours on an active machine, defeating the audit trail AuditPolicy is configured to produce."
+        }
+    }
 }

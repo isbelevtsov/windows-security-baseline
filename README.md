@@ -31,6 +31,12 @@ different from what's already covered, before relying on this in production.
 | Remote access | Disables RDP, SMBv1, and the built-in Guest account |
 | BitLocker | `Enable-/Disable-BitLocker`, local recovery key file |
 | Local accounts | Disables autologon; forces accounts with blank passwords to require one and change it at next logon |
+| Windows Update | `wuauserv` service start type + registry policy (automatic updates, deferral) |
+| PowerShell logging | Script block / module / transcription logging registry policy |
+| Removable storage | Registry policy denying all removable-disk access |
+| UAC | Registry policy (UAC enabled, consent prompt behavior, secure desktop) |
+| Network hardening | NTLM compatibility level (`LmCompatibilityLevel`), LLMNR disabled |
+| Event log retention | `wevtutil.exe` maximum size for Application/Security/System logs |
 
 Every module exposes the same four-function contract: `Test-`, `Backup-`,
 `Set-`, `Restore-<Area>Baseline`. See the [design spec](docs/superpowers/specs)
