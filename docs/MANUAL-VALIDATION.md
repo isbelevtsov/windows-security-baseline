@@ -941,3 +941,82 @@ all on this specific VM (e.g. via a clean Windows reinstall, a different
 virtual TPM implementation, or simply time/other Windows-triggered
 staging this session didn't discover) is unknown - noted here rather than
 guessed at further.
+
+### 2026-07-24 — same Home VM, resolution: found the real bootstrap mechanism, and its limit
+
+The open question above is now answered. Asked whether the manual
+Settings toggle (which is known to work) could be automated, three
+programmatic paths were tried and ruled out on this exact blank-metadata
+volume:
+
+- `manage-bde.exe -on` (a completely different binary from the cmdlet/WMI
+  paths already tried) - identical `0x8031005A`.
+- The officially-documented `BitLocker` CSP (`MDM_BitLocker`,
+  `RequireDeviceEncryption` property, in `root\cimv2\mdm\dmmap`) - the same
+  mechanism Intune/MDM enrollment uses to trigger Device Encryption with no
+  human interaction. Writing it from a regular elevated-admin session
+  failed ("the requested object could not be found"). Retried from a
+  SYSTEM-context one-shot scheduled task (the privilege level Windows'
+  own Settings toggle and MDM operate at) - got further, but failed with a
+  different, generic error ("a general error occurred that is not covered
+  by a more specific error code"). This CSP bridge appears to require
+  genuine MDM enrollment plumbing (an enrollment ID, the
+  `EnterpriseMgmt` scheduled-task infrastructure) that a standalone,
+  non-enrolled device doesn't have - writing the desired value isn't
+  enough without something to actually enact it.
+
+Then the manual Settings > Privacy & security > Device encryption toggle
+was flipped again, on this exact still-blank (`MetadataVersion = 0`)
+volume, to observe it directly instead of guessing further. Two things
+were learned:
+
+1. **A screenshot of the Settings page showed the real reason the toggle
+   alone doesn't finish**: "Sign in with your Microsoft account to finish
+   encrypting this device." Windows 11 Home's Device Encryption needs
+   somewhere to escrow the recovery key, and for a local account (this
+   VM's `user` account, confirmed via the screenshot's account panel) that
+   means a Microsoft account sign-in - which this toolkit correctly should
+   never attempt to automate (it's a credential/identity action, out of
+   scope for a hardening script, and deliberately gated by Windows itself).
+2. **Flipping the toggle alone, without ever completing that sign-in,
+   still moved `MetadataVersion` from `0` to `2` immediately** - this is
+   the one step no scriptable API could do. Once that happened, this
+   toolkit's own `Enable-BitLocker` call (which uses a local
+   recovery-password protector, not a Microsoft-account-escrowed one)
+   **succeeded immediately** with no further manual involvement - added a
+   TPM + recovery-password protector and began encrypting normally. (The
+   two ISOs also came back after the earlier reboot - a persistent VM/
+   hypervisor configuration, not a Windows behavior - and had to be
+   ejected again first; this is exactly the retriable `0x80310030` case
+   already handled.)
+
+So the complete, now fully-evidenced picture: **this toolkit can
+automate everything except the very first metadata-initialization step
+on a truly blank Home volume**, which requires a one-time human action
+(flipping the Device encryption toggle - not completing the Microsoft
+account sign-in, just the toggle) that has no scriptable equivalent this
+session could find, including the officially-documented MDM CSP path.
+Once that one-time step happens, by any means, this toolkit reliably
+takes over forever after (confirmed idempotent across multiple Apply
+runs, multiple reboots, and a full restore-to-fresh-and-reapply cycle).
+
+Fixed in `Modules/BitLocker.psm1`: added `Test-OsDriveHasBitLockerMetadata`
+(checks `MetadataVersion -gt 0`), called proactively in
+`Set-BitLockerBaseline` before ever attempting `Enable-BitLocker` - a
+blank volume now short-circuits straight to a specific, accurate Note
+naming the exact one-time bootstrap step (flip the Settings toggle, don't
+bother with the Microsoft-account prompt) instead of wastefully attempting
+and failing first. The `0x8031005A` HRESULT-lookup entry is now a
+narrower fallback for the rarer case where metadata already exists and
+media isn't the issue either - an honestly-unexplained case, still
+handled gracefully. Regression tests added for the new proactive check;
+existing tests updated to set `MetadataVersion` on their mocked volumes so
+they continue to exercise the paths they're meant to.
+
+Verified for real: after flipping the toggle and ejecting the
+re-mounted ISOs, `.\Invoke-SecurityBaseline.ps1 -Mode Apply -Modules
+BitLocker` added a local recovery-password protector and started
+encrypting on its own (`EncryptionInProgress`, climbing steadily),
+confirming the fix's proactive check correctly gets bypassed once
+metadata exists, and the existing Enable-BitLocker path still works
+exactly as validated earlier in this document.

@@ -65,7 +65,7 @@ Describe 'Test-BitLockerBaseline' {
     }
 
     It 'fails when protection status is Off' {
-        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 2 } }
         (Test-BitLockerBaseline -Config (New-TestConfig))[0].Pass | Should -BeFalse
     }
 
@@ -260,8 +260,35 @@ Describe 'Enable-OsDriveBitLocker' {
 }
 
 Describe 'Set-BitLockerBaseline' {
+    It 'reports Changed=False with a bootstrap-required Note instead of attempting Enable-BitLocker on a volume with no BitLocker metadata at all' {
+        # Regression test for a real finding on Windows 11 Home hardware:
+        # a volume at MetadataVersion=0 (never had any BitLocker metadata,
+        # e.g. right after a full decrypt) cannot be initialized via
+        # Enable-BitLocker, manage-bde.exe, or the raw
+        # Win32_EncryptableVolume.PrepareVolume WMI method - all three fail
+        # identically with HRESULT 0x8031005A, unaffected by ejecting
+        # optical media or a reboot. The only thing that worked was
+        # manually flipping Settings > Privacy & security > Device
+        # encryption to On, which staged the volume (MetadataVersion 0 -> 2)
+        # immediately, without ever completing the accompanying Microsoft
+        # account sign-in prompt. Once staged, Enable-BitLocker took over
+        # normally with a local recovery password. So this case should be
+        # detected up front and given specific, actionable guidance instead
+        # of wastefully attempting (and failing) Enable-BitLocker first.
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 0 } }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { throw 'should not be called' }
+
+        $changes = Set-BitLockerBaseline -Config (New-TestConfig)
+
+        $changes[0].Changed | Should -BeFalse
+        $changes[0].Note | Should -Match 'Device encryption'
+        $changes[0].Note | Should -Match 'Microsoft account'
+        $changes[0].Secret | Should -BeNullOrEmpty
+        Should -Invoke -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker -Times 0
+    }
+
     It 'attempts to enable encryption and saves the recovery key when not yet protected' {
-        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 2 } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { $true }
         Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
 
@@ -275,7 +302,7 @@ Describe 'Set-BitLockerBaseline' {
     }
 
     It 'includes a Note warning about the plaintext recovery key when a key is written' {
-        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 2 } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { $true }
         Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
 
@@ -287,7 +314,7 @@ Describe 'Set-BitLockerBaseline' {
     }
 
     It 'adds a Note about the missing TPM protector when Enable-OsDriveBitLocker falls back to recovery-password-only' {
-        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 2 } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { $false }
         Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
 
@@ -309,7 +336,7 @@ Describe 'Set-BitLockerBaseline' {
     }
 
     It 'attaches the recovery key as a highlightable Secret when one is written' {
-        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 2 } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { $true }
         Mock -ModuleName BitLocker -CommandName Get-OsDriveRecoveryKey { 'AAAA-1111-BBBB-2222' }
 
@@ -328,31 +355,24 @@ Describe 'Set-BitLockerBaseline' {
         $changes[0].Secret | Should -BeNullOrEmpty
     }
 
-    It 'reports Changed=False with an actionable Note instead of throwing when Enable-BitLocker returns HRESULT 0x8031005A' {
+    It 'reports Changed=False with a fallback Note instead of throwing when Enable-BitLocker returns HRESULT 0x8031005A on a volume that already has metadata' {
         # Regression test for a real failure on Windows 11 Home hardware:
         # Enable-BitLocker throws COMException HRESULT 0x8031005A ("This
         # version of Windows does not support this feature of BitLocker
         # Drive Encryption") - initially reproduced for every protector
         # combination, including via Invoke-CimMethod directly against the
         # raw Win32_EncryptableVolume WMI provider, and taken as proof of a
-        # hard edition restriction. That was only half right: on the same
-        # VM, the exact same Enable-BitLocker call stopped throwing this
-        # error and succeeded normally (added a TPM + recovery-password
-        # protector, reached ProtectionStatus=On) the moment a bootable
-        # CD/DVD (a mounted ISO) was ejected - but only on a volume that
-        # already had prior BitLocker metadata. A follow-up test on a
-        # volume with no prior metadata at all (MetadataVersion=0, right
-        # after a full decrypt) hit this same HRESULT again with no media
-        # present, and a reboot didn't change that either - so this HRESULT
-        # can mean either a retriable media-blocking condition or a genuine
-        # per-volume/hardware limitation, and the Note reflects both rather
-        # than asserting either one with false certainty. Regardless of the
-        # exact cause, this must never crash the module the way it did
-        # before this fix - the exception used to propagate all the way out
-        # of Set-BitLockerBaseline and was only ever caught by the
-        # Orchestrator's generic per-module catch-all, logging "Apply of
-        # module 'BitLocker' failed, skipping".
-        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        # hard edition restriction. Real testing traced every occurrence to
+        # one of two specific causes instead: a blank-metadata volume (now
+        # caught proactively by Test-OsDriveHasBitLockerMetadata before
+        # Enable-BitLocker is ever called - see the dedicated test above) or
+        # bootable media (HRESULT 0x80310030, handled separately below).
+        # This test covers what's left once both of those are ruled out
+        # (metadata already present, so this mock's MetadataVersion=2 means
+        # Enable-OsDriveBitLocker does get called) - an unrecognized case
+        # that must still never crash the module the way it did before this
+        # fix, even though its exact cause is now unexplained.
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 2 } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker {
             throw (New-Object System.Runtime.InteropServices.COMException('This version of Windows does not support this feature of BitLocker Drive Encryption. To use this feature, upgrade the operating system.', -2144272294))
         }
@@ -360,8 +380,8 @@ Describe 'Set-BitLockerBaseline' {
         $changes = Set-BitLockerBaseline -Config (New-TestConfig)
 
         $changes[0].Changed | Should -BeFalse
-        $changes[0].Note | Should -Match 'CD/DVD'
-        $changes[0].Note | Should -Match 'eject'
+        $changes[0].Note | Should -Match 'optical media'
+        $changes[0].Note | Should -Match 'unrecognized'
         $changes[0].Note | Should -Match 'Device Encryption'
         $changes[0].Secret | Should -BeNullOrEmpty
     }
@@ -376,7 +396,7 @@ Describe 'Set-BitLockerBaseline' {
         # deserves the same graceful non-crash treatment as the edition
         # restriction rather than propagating to the Orchestrator's generic
         # per-module failure handling.
-        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 2 } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker {
             throw (New-Object System.Runtime.InteropServices.COMException('BitLocker Drive Encryption detected bootable media (CD or DVD) in the computer. Remove the media and restart the computer before configuring BitLocker.', -2144272336))
         }
@@ -390,7 +410,7 @@ Describe 'Set-BitLockerBaseline' {
     }
 
     It 'still throws when Enable-OsDriveBitLocker fails for an unrelated reason' {
-        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off'; MetadataVersion = 2 } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { throw 'some other unexpected failure' }
 
         { Set-BitLockerBaseline -Config (New-TestConfig) } | Should -Throw

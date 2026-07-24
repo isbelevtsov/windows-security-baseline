@@ -1,36 +1,42 @@
 Import-Module (Join-Path $PSScriptRoot '..\Common\Config.psm1') -Force
 
+function Test-OsDriveHasBitLockerMetadata {
+    [CmdletBinding()]
+    param()
+    # MetadataVersion is 0 on a truly blank volume (no BitLocker metadata has
+    # ever been written) and >0 once any BitLocker/Device Encryption metadata
+    # exists, even with zero protectors and 0% encrypted. Confirmed on real
+    # Windows 11 Home hardware: Enable-BitLocker, manage-bde.exe -on, and the
+    # raw Win32_EncryptableVolume.PrepareVolume WMI method (bypassing every
+    # cmdlet layer) all fail identically with HRESULT 0x8031005A on a
+    # MetadataVersion=0 volume, unaffected by ejecting optical media or a
+    # reboot - but succeed normally once MetadataVersion is >0, regardless of
+    # how it got that way. The only thing that moved MetadataVersion from 0
+    # to 2 in this testing was flipping Settings > Privacy & security >
+    # Device encryption to On - which stages the volume immediately, even
+    # without ever completing the accompanying "sign in with your Microsoft
+    # account to finish encrypting this device" prompt that appears alongside
+    # it. So this check exists to short-circuit straight to that specific,
+    # actionable guidance instead of a generic HRESULT-based Note.
+    return (Get-OsDriveBitLockerVolume).MetadataVersion -gt 0
+}
+
 $script:BitLockerKnownApiLimitations = @(
     @{
         # HRESULT 0x8031005A ("This version of Windows does not support this
         # feature of BitLocker Drive Encryption. To use this feature, upgrade
         # the operating system.") is documented as an edition/SKU restriction,
         # but real testing on a Windows 11 Home VM found it is not a reliable
-        # signal of that by itself - it surfaced for at least two distinct,
-        # confirmed root causes on the same machine:
-        #
-        # 1. A bootable CD/DVD (a mounted ISO) present in an optical drive.
-        #    Ejecting it made Enable-BitLocker succeed immediately on a volume
-        #    that already had prior BitLocker metadata (KeyProtector-capable,
-        #    MetadataVersion > 0) - added a TPM + recovery-password protector,
-        #    reached ProtectionStatus=On, no other change.
-        # 2. A volume with NO prior BitLocker metadata at all (MetadataVersion
-        #    = 0, e.g. immediately after a full Disable-BitLocker/decrypt).
-        #    On this same VM/edition/hardware, with no optical media mounted,
-        #    Enable-BitLocker - and the raw Win32_EncryptableVolume WMI
-        #    PrepareVolume method directly, bypassing every cmdlet layer -
-        #    both threw this identical HRESULT. A reboot (to let Windows'
-        #    background Device Encryption readiness process re-stage the
-        #    volume, which is the likely explanation for why case 1's volume
-        #    had metadata to begin with) did not change the outcome either.
-        #
-        # So case 1 is a real, retriable condition worth checking first; case
-        # 2 looks like a genuine per-volume/hardware limitation this toolkit
-        # cannot route around via any API it can reach - confirmed at the
-        # lowest possible layer, not just the cmdlet. Both are still handled
-        # gracefully rather than left to crash the module.
+        # signal of that by itself - every occurrence traced back to one of
+        # two confirmed causes, both handled elsewhere: a blank-metadata
+        # volume (see Test-OsDriveHasBitLockerMetadata, checked before this
+        # ever gets called) or bootable media (0x80310030 below). This entry
+        # is now only a fallback for the case neither of those explains -
+        # still handled gracefully rather than left to crash the module, but
+        # the Note no longer repeats guidance the other two paths already
+        # gave more specifically.
         HResult = -2144272294
-        Note    = "Enable-BitLocker returned HRESULT 0x8031005A ('This version of Windows does not support this feature of BitLocker Drive Encryption'). This is not a reliable signal of a hard edition block by itself - on real Windows 11 Home hardware it was confirmed to also occur (a) whenever a CD/DVD, including a mounted ISO, was present in any optical drive, resolved by ejecting it and retrying, and separately (b) on a volume with no prior BitLocker metadata at all (e.g. right after a full decrypt), where it persisted even with no media present and after a reboot - the lowest-level Win32_EncryptableVolume.PrepareVolume WMI call failed identically, with no cmdlet involved. First: eject any mounted CD/DVD/ISO from every optical drive and re-run Apply. If it still recurs with no media present, this may be a per-volume/hardware limitation with no further scriptable fix - Home's automatic Device Encryption (Settings > Privacy & security > Device encryption) may or may not succeed either, since it relies on the same underlying mechanism."
+        Note    = "Enable-BitLocker returned HRESULT 0x8031005A ('This version of Windows does not support this feature of BitLocker Drive Encryption'), despite this volume already having BitLocker metadata and no bootable media detected - the two confirmed causes for this error on real Windows 11 Home hardware. This is an unrecognized case: check for optical media in every drive as a first step regardless, then treat this as a genuine, unexplained edition/hardware limitation - Home's automatic Device Encryption (Settings > Privacy & security > Device encryption) may or may not succeed either, since it relies on the same underlying mechanism."
     }
     @{
         # HRESULT 0x80310030 ("BitLocker Drive Encryption detected bootable
@@ -267,6 +273,21 @@ function Set-BitLockerBaseline {
     $recoveryKey = $null
 
     if (-not $before.Pass) {
+        if (-not (Test-OsDriveHasBitLockerMetadata)) {
+            return @(
+                [PSCustomObject]@{
+                    Module      = 'BitLocker'
+                    Setting     = 'OSDriveEncrypted'
+                    Before      = $before.Actual
+                    After       = $before.Actual
+                    Changed     = $false
+                    Note        = "This OS drive has no BitLocker metadata at all yet. On Windows 11 Home, initializing a completely blank volume isn't possible via any API this toolkit can reach (confirmed: Enable-BitLocker, manage-bde.exe, and the raw Win32_EncryptableVolume.PrepareVolume WMI method all fail identically with HRESULT 0x8031005A, unaffected by ejecting optical media or a reboot). This requires a one-time manual step: open Settings > Privacy & security > Device encryption and turn the toggle on - simply flipping it stages the volume immediately, even if the accompanying 'Sign in with your Microsoft account to finish encrypting this device' prompt is never completed. Once that's done, re-run Apply - this toolkit takes over automatically from there, adding a local TPM + recovery-password protector and completing encryption with no Microsoft account needed, the same way every other Apply run does once a volume has been staged once."
+                    Secret      = $null
+                    SecretLabel = $null
+                }
+            )
+        }
+
         try {
             $tpmProtectorAdded = Enable-OsDriveBitLocker -EncryptionMethod $method
         }

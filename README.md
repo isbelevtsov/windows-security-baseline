@@ -14,14 +14,19 @@ have each been run for real on both a Windows Pro test VM and a Windows Home
 test VM (see [`docs/MANUAL-VALIDATION.md`](docs/MANUAL-VALIDATION.md)
 Findings for the bugs that surfaced and were fixed as a result). BitLocker
 reached `ProtectionStatus = On` and stayed there across repeated idempotent
-Apply runs on Pro, and on Home too once a mounted CD/DVD (which had been
-silently blocking it under a misleading "this edition doesn't support this
-feature" error) was ejected - but a later test on the same Home VM found
-that a volume with no prior BitLocker metadata at all (e.g. after a full
-decrypt) can hit that same error in a way ejecting media and rebooting
-doesn't resolve, which looks like a genuine per-volume/hardware limit this
-toolkit can't route around. See the Findings entries for the full story
-before assuming BitLocker will activate on every Home device. Run through
+Apply runs on both editions - Home included, once a mounted CD/DVD (which
+had been silently blocking it under a misleading "this edition doesn't
+support this feature" error) was ejected. On Home specifically, there is
+one thing this toolkit cannot do: initialize BitLocker metadata on a
+completely blank volume (e.g. immediately after a full decrypt) - every
+scriptable API tried, including the officially-documented MDM `BitLocker`
+CSP, fails identically. That first-time initialization needs one manual,
+one-time step (flipping Settings > Privacy & security > Device encryption
+to On - not completing its Microsoft-account sign-in prompt, just the
+toggle); this toolkit reliably takes over from there forever after,
+confirmed across multiple Apply runs, reboots, and a full
+restore-to-fresh-and-reapply cycle. See the Findings entries for the full
+investigation. Run through
 `docs/MANUAL-VALIDATION.md` on any device meaningfully different from what's
 already covered (e.g. Enterprise, a domain-joined machine, or real - not
 virtual - hardware) before relying on this in production.
