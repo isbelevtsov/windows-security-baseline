@@ -83,7 +83,10 @@ BitLocker for real.
       shows `EnableScriptBlockLogging = 1`, and
       `C:\ProgramData\SecurityBaseline\PowerShellTranscripts` exists.
 - [ ] `HKLM:\SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices\{53f5630d-b6bf-11d0-94f2-00a0c91efb8b}`
-      shows `Deny_All = 1`; plugging in a USB drive shows access denied.
+      shows `Deny_Write = 1` and no `Deny_All` value (not a real Windows
+      setting — see Findings below); plugging in a USB drive shows files can
+      still be opened/read but copying a new file to it, or deleting/editing
+      one already on it, fails with an access-denied error.
 - [ ] `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System` shows
       `ConsentPromptBehaviorAdmin = 2`.
 - [ ] `HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\LmCompatibilityLevel` is `5`,
@@ -679,3 +682,39 @@ Verified for real against this VM, full cycle, no bugs found this round:
 No new bugs surfaced this round — first module addition in this project's
 real-hardware validation history to go from Audit through Apply,
 idempotency, and Restore with nothing to fix.
+
+### 2026-07-24 — same VM, RemovableStorage follow-up: `Deny_All` was never a real Windows setting
+
+Asked to clarify the removable-storage setting so it blocks write access
+only, leaving read allowed (the toolkit had been configured to deny all
+access outright). While making that change, found that `Modules/RemovableStorage.psm1`
+was writing a registry value named `Deny_All` under the "Removable Disks"
+device-class key
+(`HKLM:\SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices\{53f5630d-b6bf-11d0-94f2-00a0c91efb8b}`)
+— confirmed via web search against Microsoft's actual Removable Storage
+Access Group Policy documentation that this key only recognizes `Deny_Read`
+and `Deny_Write` per device class; there is no `Deny_All` at this path (a
+value of that name exists only directly under the parent
+`RemovableStorageDevices` key, for the separate "All Removable Storage
+classes" policy, which this module was never targeting). Confirmed directly
+on this VM: `Get-ItemProperty` on the key showed `Deny_All = 1` with no
+`Deny_Write`/`Deny_Read` present at all — meaning every prior `Apply` run
+that reported this setting as compliant had, in reality, changed nothing;
+removable storage access was never actually restricted despite the toolkit
+saying otherwise.
+
+Fixed in `Modules/RemovableStorage.psm1`: now reads/writes `Deny_Write`
+instead of `Deny_All` (setting name renamed
+`RemovableDisksAccessDenied` → `RemovableDisksWriteDenied`; config key
+renamed `DenyAllAccess` → `DenyWriteAccess` in `Config/Baseline.config.psd1`),
+which also directly satisfies the write-only-block request — `Deny_Read` is
+a distinct, real value under the same key that this module deliberately
+never touches, so read access is never denied. Verified for real: a fresh
+`Audit` after the fix correctly reported non-compliant (the stale `Deny_All`
+value has no effect Windows recognizes, so nothing was actually enforced),
+`Apply` set `Deny_Write = 1`, and the stale `Deny_All` value was left in
+place harmlessly (Windows ignores unrecognized value names at this path) —
+worth manually removing on any machine this ran against before this fix.
+**Not yet confirmed by an actual USB read/write attempt on this VM** (no
+removable media attached to it) — re-check the Apply-mode checklist item
+above on real hardware with a USB drive attached before relying on this.

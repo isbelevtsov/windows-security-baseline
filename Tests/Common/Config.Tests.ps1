@@ -46,7 +46,7 @@ Describe 'Import-BaselineConfig' {
         $config.LocalAccounts.DisableAutoLogon.Value | Should -Be $true
         $config.WindowsUpdate.AutomaticUpdatesEnabled.Value | Should -Be $true
         $config.PowerShellLogging.EnableScriptBlockLogging.Value | Should -Be $true
-        $config.RemovableStorage.DenyAllAccess.Value | Should -Be $true
+        $config.RemovableStorage.DenyWriteAccess.Value | Should -Be $true
         $config.UAC.EnableLUA.Value | Should -Be $true
         $config.NetworkHardening.LmCompatibilityLevel.Value | Should -Be 5
         $config.EventLogRetention.MinimumMaxSizeBytes.Value | Should -Be 104857600

@@ -4,13 +4,13 @@ BeforeAll {
 
     function New-TestConfig {
         @{
-            DenyAllAccess = @{ Value = $true; Description = 'deny all removable storage access' }
+            DenyWriteAccess = @{ Value = $true; Description = 'deny write access to removable storage' }
         }
     }
 }
 
 Describe 'Test-RemovableStorageBaseline' {
-    It 'flags removable storage access as non-compliant when not denied' {
+    It 'flags removable storage write access as non-compliant when not denied' {
         Mock -ModuleName RemovableStorage -CommandName Get-RegistryDwordOrDefault { param($Path, $Name, $Default) 0 }
 
         $results = Test-RemovableStorageBaseline -Config (New-TestConfig)
@@ -18,7 +18,7 @@ Describe 'Test-RemovableStorageBaseline' {
         $results[0].Pass | Should -BeFalse
     }
 
-    It 'passes when removable storage access is already denied' {
+    It 'passes when removable storage write access is already denied' {
         Mock -ModuleName RemovableStorage -CommandName Get-RegistryDwordOrDefault { param($Path, $Name, $Default) 1 }
 
         $results = Test-RemovableStorageBaseline -Config (New-TestConfig)
@@ -28,14 +28,14 @@ Describe 'Test-RemovableStorageBaseline' {
 }
 
 Describe 'Set-RemovableStorageBaseline' {
-    It 'sets Deny_All when not yet compliant' {
+    It 'sets Deny_Write when not yet compliant' {
         Mock -ModuleName RemovableStorage -CommandName Get-RegistryDwordOrDefault { param($Path, $Name, $Default) 0 }
         Mock -ModuleName RemovableStorage -CommandName Set-RegistryDword { }
 
         $changes = Set-RemovableStorageBaseline -Config (New-TestConfig)
 
         $changes[0].Changed | Should -BeTrue
-        Should -Invoke -ModuleName RemovableStorage -CommandName Set-RegistryDword -Times 1 -ParameterFilter { $Name -eq 'Deny_All' -and $Value -eq 1 }
+        Should -Invoke -ModuleName RemovableStorage -CommandName Set-RegistryDword -Times 1 -ParameterFilter { $Name -eq 'Deny_Write' -and $Value -eq 1 }
     }
 
     It 'does nothing when already compliant' {
@@ -50,7 +50,7 @@ Describe 'Set-RemovableStorageBaseline' {
 }
 
 Describe 'Backup-RemovableStorageSettings / Restore-RemovableStorageSettings' {
-    It 'removes Deny_All on restore when it did not exist at backup time' {
+    It 'removes Deny_Write on restore when it did not exist at backup time' {
         Mock -ModuleName RemovableStorage -CommandName Test-RegistryValueExists { $false }
         Mock -ModuleName RemovableStorage -CommandName Get-RegistryDwordOrDefault { param($Path, $Name, $Default) $Default }
 
@@ -62,7 +62,7 @@ Describe 'Backup-RemovableStorageSettings / Restore-RemovableStorageSettings' {
 
         Restore-RemovableStorageSettings -BackupPath $backupPath
 
-        Should -Invoke -ModuleName RemovableStorage -CommandName Remove-RegistryValue -Times 1 -ParameterFilter { $Name -eq 'Deny_All' }
+        Should -Invoke -ModuleName RemovableStorage -CommandName Remove-RegistryValue -Times 1 -ParameterFilter { $Name -eq 'Deny_Write' }
         Should -Invoke -ModuleName RemovableStorage -CommandName Set-RegistryDword -Times 0
     }
 
@@ -78,7 +78,7 @@ Describe 'Backup-RemovableStorageSettings / Restore-RemovableStorageSettings' {
 
         Restore-RemovableStorageSettings -BackupPath $backupPath
 
-        Should -Invoke -ModuleName RemovableStorage -CommandName Set-RegistryDword -Times 1 -ParameterFilter { $Name -eq 'Deny_All' -and $Value -eq 1 }
+        Should -Invoke -ModuleName RemovableStorage -CommandName Set-RegistryDword -Times 1 -ParameterFilter { $Name -eq 'Deny_Write' -and $Value -eq 1 }
     }
 
     It 'throws when restoring without a prior backup' {

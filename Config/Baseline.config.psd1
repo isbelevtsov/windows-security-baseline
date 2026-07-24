@@ -155,9 +155,9 @@
         }
     }
     RemovableStorage = @{
-        DenyAllAccess = @{
+        DenyWriteAccess = @{
             Value       = $true
-            Description = "Blocks read/write/execute access to removable disks (USB mass storage) system-wide, not just auditing attempts at it (see AuditPolicy's 'Removable Storage' subcategory) - reduces the most common PHI exfiltration and malware-introduction path on a standalone device with no DLP tooling."
+            Description = "Blocks write access to removable disks (USB mass storage) system-wide, not just auditing attempts at it (see AuditPolicy's 'Removable Storage' subcategory) - reduces the most common PHI exfiltration path on a standalone device with no DLP tooling, while leaving read access available so removable media can still be used to bring data in."
         }
     }
     UAC = @{
