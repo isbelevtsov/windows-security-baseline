@@ -718,3 +718,96 @@ worth manually removing on any machine this ran against before this fix.
 **Not yet confirmed by an actual USB read/write attempt on this VM** (no
 removable media attached to it) — re-check the Apply-mode checklist item
 above on real hardware with a USB drive attached before relying on this.
+
+### 2026-07-24 — first Windows 11 Home run, full Audit/Apply/Restore cycle
+
+Ran the mocked Pester suite (`Invoke-Pester -Path Tests`, 206 tests, after
+installing Pester 5+ via `Install-PackageProvider NuGet` +
+`Install-Module Pester -Scope CurrentUser` — the box only shipped the
+ancient built-in Pester 3.4.0, which can't run this suite's `Should -Invoke`/
+`InModuleScope` syntax), then a full real `-Mode Audit` → `-Mode Apply` →
+`-Mode Restore` cycle against a genuine Windows 11 **Home** VM (`Get-CimInstance
+Win32_OperatingSystem` confirms `Microsoft Windows 11 Home`, `Get-WindowsEdition
+-Online` confirms SKU `Core`) — the edition this toolkit had never been
+run against before. One real bug found and fixed:
+
+- **BitLocker `Apply` crashed the module instead of degrading gracefully.**
+  `Enable-BitLocker` throws `COMException` HRESULT `0x8031005A` ("This
+  version of Windows does not support this feature of BitLocker Drive
+  Encryption. To use this feature, upgrade the operating system.") on Home,
+  for every protector combination tried (`-TpmProtector`,
+  `-RecoveryPasswordProtector`, with or without `-EncryptionMethod`) —
+  confirmed by calling each directly. This wasn't about missing hardware
+  prerequisites (this VM's TPM was present, ready, owned, and activated,
+  and Secure Boot was on) - Windows 11 Home simply never exposes full
+  BitLocker Drive Encryption via this cmdlet path at all, regardless of
+  hardware; only the OS's own automatic "Device Encryption" applies on
+  Home, and it isn't controllable through `Enable-BitLocker`. Every
+  existing fallback branch in `Enable-OsDriveBitLocker` still ends up
+  calling `Enable-BitLocker` one way or another, so all of them threw the
+  same error, which propagated all the way past `Set-BitLockerBaseline`
+  to the Orchestrator's generic per-module catch-all — logging
+  `Apply of module 'BitLocker' failed, skipping` instead of the graceful
+  "unavailable, not a crash" outcome this checklist has always expected
+  for Home. Fixed in `Modules/BitLocker.psm1`: `Set-BitLockerBaseline` now
+  catches this exact HRESULT (`Test-BitLockerUnsupportedByEditionError`,
+  matched on `$_.Exception.HResult -eq -2144272294` rather than the message
+  string, which could vary by locale) and reports `Changed=False` with a
+  clear Note instead of letting it propagate; any other exception still
+  throws through unchanged, preserving the existing failure-surfacing
+  behavior for genuinely unexpected errors. Regression tests added
+  reproducing the exact HRESULT and asserting both the graceful path and
+  that unrelated failures still throw.
+
+Verified for real, full cycle, no other bugs found:
+
+- **Audit** (fresh, never-configured machine): all 54 settings across 15
+  modules read correctly, including genuine Windows-default values
+  (`LmCompatibilityLevel = 3`, `ConsentPromptBehaviorAdmin = 5`, event logs
+  at their 20 MiB default, all 4 `WindowsUpdate` settings and both
+  `UAC.EnableLUA`/`PromptOnSecureDesktop` already compliant out of the box) -
+  37 settings failed, matching what `Apply` then changed.
+- **Apply**: `36 setting(s) changed`, `LASTEXITCODE 0`, no crash (after the
+  BitLocker fix above). Direct spot-checks against the live system (not
+  just the toolkit's own re-`Audit`) confirmed `net accounts`,
+  `Get-NetFirewallProfile`, `auditpol /get /category:*`,
+  `Get-ItemProperty ... Terminal Server\fDenyTSConnections`,
+  `Get-SmbServerConfiguration`, `Get-LocalUser -Name Guest`,
+  `Get-ItemProperty ... PowerShell\ScriptBlockLogging`/`ModuleLogging`/
+  `Transcription`, the `RemovableStorageDevices` `Deny_Write` key,
+  `ConsentPromptBehaviorAdmin`, `LmCompatibilityLevel`, `EnableMulticast`,
+  `(Get-WinEvent -ListLog ...).MaximumSizeInBytes`, and
+  `InactivityTimeoutSecs` all matched exactly what the toolkit reported.
+  `LocalAccounts` correctly detected this VM's own interactively-logged-on
+  `user` account had `PasswordRequired = False`, set a compliant 24-char
+  temporary password (written to
+  `C:\ProgramData\SecurityBaseline\TemporaryPasswords\user-temp-password.txt`),
+  and forced a password change at next logon - consistent with the LocalAccounts
+  behavior already validated on the Pro VM. **Not independently re-confirmed
+  by an actual interactive logon in this session** (this exact mechanism was
+  already confirmed working end-to-end on the Pro VM run above); if it's
+  reused on this VM going forward, check the temp password file is still
+  there and consider clearing it once a real password has been set.
+- **Idempotency**: immediate re-`Apply` reported `0 setting(s) changed`
+  (BitLocker's graceful edition-unsupported Note repeats every run, as
+  expected, since Home can never satisfy `OSDriveEncrypted` through this
+  toolkit).
+- **Restore**: `Restore -Latest` completed without throwing (its backup
+  happened to be the idempotent no-op run's snapshot, so nothing changed -
+  expected, not a bug). A second `Restore -Timestamp` targeting the
+  **first** `Apply`'s backup then genuinely reverted 35 of the original 37
+  failing settings back to their true pre-`Apply` values (confirmed via a
+  fresh `Audit` immediately after, and direct spot-checks of `net accounts`,
+  firewall, and audit policy) - the other 2 (`LocalAccounts`
+  `PasswordRequired`/`PasswordNeverExpires`) correctly stayed hardened by
+  design, matching the intentional one-way security posture already
+  documented above. Re-applied afterward to leave the VM in its hardened
+  state.
+
+Home-edition checklist items still not exercised on this VM (no physical
+access / no removable media attached): the 15-minute auto-lock wait, an
+actual USB drive write-denial test, and a non-elevated-prompt run to
+confirm the "must be run from an elevated" error message (the underlying
+`Test-BaselineElevation` guard logic was inspected directly and is
+unchanged from what the Pro VM run already exercises via
+`Set-StrictMode -Version Latest` + a direct call, which passed here too).

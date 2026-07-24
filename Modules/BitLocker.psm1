@@ -1,5 +1,20 @@
 Import-Module (Join-Path $PSScriptRoot '..\Common\Config.psm1') -Force
 
+function Test-BitLockerUnsupportedByEditionError {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ErrorRecord)
+    # HRESULT 0x8031005A ("This version of Windows does not support this
+    # feature of BitLocker Drive Encryption. To use this feature, upgrade the
+    # operating system.") is what every Enable-BitLocker call throws on
+    # Windows 11 Home - confirmed on real Home hardware, with a TPM present
+    # and ready, using both a TPM protector and a recovery-password-only
+    # protector. Home never has full BitLocker Drive Encryption regardless of
+    # hardware capability (only automatic, Windows-managed "Device
+    # Encryption", which isn't controllable via this cmdlet path) - this is a
+    # permanent edition restriction, not a transient failure worth retrying.
+    return $ErrorRecord.Exception.HResult -eq -2144272294
+}
+
 function Get-OsDriveBitLockerVolume {
     [CmdletBinding()]
     param()
@@ -210,7 +225,26 @@ function Set-BitLockerBaseline {
     $recoveryKey = $null
 
     if (-not $before.Pass) {
-        $tpmProtectorAdded = Enable-OsDriveBitLocker -EncryptionMethod $method
+        try {
+            $tpmProtectorAdded = Enable-OsDriveBitLocker -EncryptionMethod $method
+        }
+        catch {
+            if (Test-BitLockerUnsupportedByEditionError -ErrorRecord $_) {
+                return @(
+                    [PSCustomObject]@{
+                        Module      = 'BitLocker'
+                        Setting     = 'OSDriveEncrypted'
+                        Before      = $before.Actual
+                        After       = $before.Actual
+                        Changed     = $false
+                        Note        = "BitLocker Drive Encryption isn't available on this Windows edition (Enable-BitLocker returned HRESULT 0x8031005A, 'This version of Windows does not support this feature'). Only Windows' automatic Device Encryption applies here, which this toolkit can't control - if this device meets its hardware eligibility requirements, Windows may enable it on its own; otherwise the OS drive is expected to stay unencrypted on this edition."
+                        Secret      = $null
+                        SecretLabel = $null
+                    }
+                )
+            }
+            throw
+        }
 
         if (-not (Test-Path -Path $keyFolder)) {
             New-Item -Path $keyFolder -ItemType Directory -Force | Out-Null

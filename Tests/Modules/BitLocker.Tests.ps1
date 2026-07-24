@@ -327,6 +327,37 @@ Describe 'Set-BitLockerBaseline' {
 
         $changes[0].Secret | Should -BeNullOrEmpty
     }
+
+    It 'reports Changed=False with an edition-limitation Note instead of throwing when BitLocker is unsupported on this edition' {
+        # Regression test for a real failure on Windows 11 Home hardware:
+        # Enable-BitLocker throws COMException HRESULT 0x8031005A ("This
+        # version of Windows does not support this feature of BitLocker
+        # Drive Encryption") for every protector combination, regardless of
+        # hardware (a TPM was present and ready on the test device). Before
+        # this fix, the exception propagated all the way out of
+        # Set-BitLockerBaseline and was only ever caught by the
+        # Orchestrator's generic per-module catch-all, logging "Apply of
+        # module 'BitLocker' failed, skipping" instead of the graceful,
+        # non-crash outcome this known edition restriction deserves.
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker {
+            throw (New-Object System.Runtime.InteropServices.COMException('This version of Windows does not support this feature of BitLocker Drive Encryption. To use this feature, upgrade the operating system.', -2144272294))
+        }
+
+        $changes = Set-BitLockerBaseline -Config (New-TestConfig)
+
+        $changes[0].Changed | Should -BeFalse
+        $changes[0].Note | Should -Match 'edition'
+        $changes[0].Note | Should -Match 'Device Encryption'
+        $changes[0].Secret | Should -BeNullOrEmpty
+    }
+
+    It 'still throws when Enable-OsDriveBitLocker fails for an unrelated reason' {
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker { throw 'some other unexpected failure' }
+
+        { Set-BitLockerBaseline -Config (New-TestConfig) } | Should -Throw
+    }
 }
 
 Describe 'Restore-BitLockerSettings' {

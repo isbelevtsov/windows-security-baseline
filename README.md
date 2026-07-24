@@ -10,13 +10,15 @@ Originally built and tested only on non-Windows dev hardware, with every OS
 interaction (registry, `secedit.exe`, `auditpol.exe`, `netsh.exe`, `reg.exe`,
 Defender/NetSecurity/BitLocker/LocalAccounts cmdlets) mocked in the test
 suite. Since then, `-Mode Audit`, `-Mode Apply`, and `-Mode Restore -Latest`
-have each been run for real on a Windows Pro test VM (see
-[`docs/MANUAL-VALIDATION.md`](docs/MANUAL-VALIDATION.md) Findings for the
-bugs that surfaced and were fixed as a result), including BitLocker reaching
-`ProtectionStatus = On` and staying there across repeated idempotent Apply
-runs. **Windows 11 Home has not yet been validated.** Run through
-`docs/MANUAL-VALIDATION.md` on a Home device, and on any device meaningfully
-different from what's already covered, before relying on this in production.
+have each been run for real on both a Windows Pro test VM and a Windows Home
+test VM (see [`docs/MANUAL-VALIDATION.md`](docs/MANUAL-VALIDATION.md)
+Findings for the bugs that surfaced and were fixed as a result), including
+BitLocker reaching `ProtectionStatus = On` and staying there across repeated
+idempotent Apply runs on Pro, and BitLocker's absence on Home being reported
+as a graceful non-compliant Note rather than a crash. Run through
+`docs/MANUAL-VALIDATION.md` on any device meaningfully different from what's
+already covered (e.g. Enterprise, a domain-joined machine, or real - not
+virtual - hardware) before relying on this in production.
 
 ## What it covers
 
