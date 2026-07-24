@@ -328,17 +328,26 @@ Describe 'Set-BitLockerBaseline' {
         $changes[0].Secret | Should -BeNullOrEmpty
     }
 
-    It 'reports Changed=False with an edition-limitation Note instead of throwing when BitLocker is unsupported on this edition' {
+    It 'reports Changed=False with an actionable Note instead of throwing when Enable-BitLocker returns HRESULT 0x8031005A' {
         # Regression test for a real failure on Windows 11 Home hardware:
         # Enable-BitLocker throws COMException HRESULT 0x8031005A ("This
         # version of Windows does not support this feature of BitLocker
-        # Drive Encryption") for every protector combination, regardless of
-        # hardware (a TPM was present and ready on the test device). Before
-        # this fix, the exception propagated all the way out of
+        # Drive Encryption") - initially reproduced for every protector
+        # combination, including via Invoke-CimMethod directly against the
+        # raw Win32_EncryptableVolume WMI provider, and taken as proof of a
+        # hard edition restriction. That did not hold up: on the same VM,
+        # the exact same Enable-BitLocker call stopped throwing this error
+        # and succeeded normally the moment a bootable CD/DVD (a mounted
+        # ISO) was ejected from a virtual optical drive - no edition or
+        # hardware change at all. So this HRESULT is not reliable proof of
+        # a genuine edition block; the Note leads with the actionable,
+        # disprovable step (check for mounted media) rather than asserting
+        # this device can never support BitLocker. Regardless of the exact
+        # cause, this must never crash the module the way it did before this
+        # fix - the exception used to propagate all the way out of
         # Set-BitLockerBaseline and was only ever caught by the
         # Orchestrator's generic per-module catch-all, logging "Apply of
-        # module 'BitLocker' failed, skipping" instead of the graceful,
-        # non-crash outcome this known edition restriction deserves.
+        # module 'BitLocker' failed, skipping".
         Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
         Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker {
             throw (New-Object System.Runtime.InteropServices.COMException('This version of Windows does not support this feature of BitLocker Drive Encryption. To use this feature, upgrade the operating system.', -2144272294))
@@ -347,8 +356,32 @@ Describe 'Set-BitLockerBaseline' {
         $changes = Set-BitLockerBaseline -Config (New-TestConfig)
 
         $changes[0].Changed | Should -BeFalse
-        $changes[0].Note | Should -Match 'edition'
+        $changes[0].Note | Should -Match 'CD/DVD'
+        $changes[0].Note | Should -Match 'eject'
         $changes[0].Note | Should -Match 'Device Encryption'
+        $changes[0].Secret | Should -BeNullOrEmpty
+    }
+
+    It 'reports Changed=False with a bootable-media Note instead of throwing when a CD/DVD blocks configuration' {
+        # Regression test for a real failure found on the same Windows 11
+        # Home VM used above: Enable-BitLocker threw COMException HRESULT
+        # 0x80310030 ("BitLocker Drive Encryption detected bootable media
+        # (CD or DVD) in the computer...") because a virtual optical drive
+        # had an ISO mounted. This is a real, re-triggerable condition (a
+        # forgotten install disc or mounted ISO), not edition-specific, and
+        # deserves the same graceful non-crash treatment as the edition
+        # restriction rather than propagating to the Orchestrator's generic
+        # per-module failure handling.
+        Mock -ModuleName BitLocker -CommandName Get-OsDriveBitLockerVolume { [PSCustomObject]@{ ProtectionStatus = 'Off' } }
+        Mock -ModuleName BitLocker -CommandName Enable-OsDriveBitLocker {
+            throw (New-Object System.Runtime.InteropServices.COMException('BitLocker Drive Encryption detected bootable media (CD or DVD) in the computer. Remove the media and restart the computer before configuring BitLocker.', -2144272336))
+        }
+
+        $changes = Set-BitLockerBaseline -Config (New-TestConfig)
+
+        $changes[0].Changed | Should -BeFalse
+        $changes[0].Note | Should -Match 'bootable media'
+        $changes[0].Note | Should -Match 'eject'
         $changes[0].Secret | Should -BeNullOrEmpty
     }
 

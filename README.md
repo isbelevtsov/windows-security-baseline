@@ -14,8 +14,9 @@ have each been run for real on both a Windows Pro test VM and a Windows Home
 test VM (see [`docs/MANUAL-VALIDATION.md`](docs/MANUAL-VALIDATION.md)
 Findings for the bugs that surfaced and were fixed as a result), including
 BitLocker reaching `ProtectionStatus = On` and staying there across repeated
-idempotent Apply runs on Pro, and BitLocker's absence on Home being reported
-as a graceful non-compliant Note rather than a crash. Run through
+idempotent Apply runs on **both** editions - Home included, once a mounted
+CD/DVD (which had been silently blocking it and producing a misleading
+"this edition doesn't support this feature" error) was ejected. Run through
 `docs/MANUAL-VALIDATION.md` on any device meaningfully different from what's
 already covered (e.g. Enterprise, a domain-joined machine, or real - not
 virtual - hardware) before relying on this in production.

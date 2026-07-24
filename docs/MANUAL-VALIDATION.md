@@ -811,3 +811,67 @@ confirm the "must be run from an elevated" error message (the underlying
 `Test-BaselineElevation` guard logic was inspected directly and is
 unchanged from what the Pro VM run already exercises via
 `Set-StrictMode -Version Latest` + a direct call, which passed here too).
+
+### 2026-07-24 — same Home VM, correction: BitLocker was never actually edition-blocked - a mounted ISO was
+
+The entry above concluded Windows 11 Home can never support full BitLocker
+Drive Encryption via any API this toolkit can reach, "confirmed" via
+`Enable-BitLocker`, `Add-BitLockerKeyProtector`, and a raw
+`Invoke-CimMethod` call directly against the `Win32_EncryptableVolume` WMI
+provider - all three returned HRESULT `0x8031005A` ("This version of
+Windows does not support this feature"). **That conclusion was wrong.**
+
+While investigating whether Device Encryption could be triggered as a
+fallback, `Enable-BitLocker` was retried on this exact same VM and threw a
+*different* error: `0x80310030`, "BitLocker Drive Encryption detected
+bootable media (CD or DVD) in the computer." This VM had two ISOs mounted
+in virtual optical drives the entire time (a virtio driver disc and a
+Windows install disc - standard leftovers from provisioning a QEMU VM) -
+present during every earlier test in the entry above, unnoticed because
+none of that testing checked for mounted media. After fixing the toolkit to
+handle `0x80310030` gracefully too (see below), the media was ejected to
+verify the new code path for real - and `Enable-BitLocker` **succeeded
+immediately** on the next attempt, with no other change: a TPM and a
+recovery-password protector were added, and the volume reached
+`VolumeStatus = FullyEncrypted`, `ProtectionStatus = On` within minutes
+(a ~49 GB used-space-only volume). A follow-up `-Mode Apply` was fully
+idempotent (`0 setting(s) changed`, exactly the same two protectors, no
+duplicates), and `-Mode Audit` reported `OSDriveEncrypted` compliant.
+
+So Windows 11 Home **does** support full BitLocker Drive Encryption via
+`Enable-BitLocker` on this hardware after all. The real blocker the whole
+time was the mounted ISOs, and `0x8031005A` is not a reliable signal of a
+genuine edition restriction - it can also surface for other blocking
+preconditions (confirmed: bootable media present) that Windows reports
+under the same code as the documented edition/SKU error. Why Windows
+returns that specific code for a media-related block rather than
+`0x80310030` in some call paths is not something this project can confirm
+without access to Windows' internals; only the empirical, reproducible
+before/after (identical call, only the media changed, on the same
+edition/hardware) is claimed here.
+
+Fixed in `Modules/BitLocker.psm1`:
+- Added graceful handling for `0x80310030` (bootable media present)
+  alongside the existing `0x8031005A` handling, via a small
+  HRESULT-to-Note lookup (`Get-BitLockerKnownApiLimitationNote`) rather
+  than a single-purpose edition check - reports `Changed=False` with a
+  clear "eject the media and retry" Note instead of crashing the module,
+  the same graceful treatment `0x8031005A` already got.
+- Rewrote the `0x8031005A` Note to lead with the actionable, disprovable
+  step (check for and eject any mounted CD/DVD/ISO) before suggesting a
+  genuine edition/hardware limitation as a fallback explanation, instead
+  of asserting Home can never support BitLocker regardless of hardware -
+  a claim this session's own follow-up testing directly disproved.
+- Regression tests added for both HRESULTs, including one asserting the
+  `0x8031005A` case no longer claims certainty about an edition block.
+
+Also corrects the README's Home-validation summary, which previously
+described BitLocker's "absence on Home" as the expected outcome - it now
+notes BitLocker reaching `ProtectionStatus = On` on **both** editions
+tested, Home included, once the mounted media was cleared.
+
+**Practical takeaway for future validation runs**: if `Enable-BitLocker`
+throws `0x8031005A` on any edition, check for mounted CD/DVD/ISO media in
+every optical drive (`Get-Volume | Where-Object DriveType -eq 'CD-ROM'`)
+and eject it before concluding the edition can't support BitLocker - this
+is now a known false signal, not confirmed proof.
