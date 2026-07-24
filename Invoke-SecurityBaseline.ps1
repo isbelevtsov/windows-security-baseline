@@ -49,5 +49,12 @@ if ($Mode -eq 'Restore' -and -not $Latest -and -not $Timestamp) {
 
 $runTimestamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'
 
+# Invoke-BaselineRun's result objects are for programmatic/Pester callers
+# (see Tests\Common\Orchestrator.Tests.ps1) - this entry point is normally run
+# interactively, where an uncaptured return value gets auto-dumped to the
+# console by PowerShell after everything else, burying the audit summary
+# table / "SAVE THESE NOW" secrets banner that Write-BaselineAuditSummary and
+# Write-BaselineApplySummary already print. Suppress it here so those stay
+# the last thing the operator sees.
 Invoke-BaselineRun -Mode $Mode -Modules $Modules -RootPath $RootPath -ConfigPath $ConfigPath `
-    -RunTimestamp $runTimestamp -SnapshotTimestamp $Timestamp -Latest:$Latest -DecryptOnRestore:$DecryptOnRestore
+    -RunTimestamp $runTimestamp -SnapshotTimestamp $Timestamp -Latest:$Latest -DecryptOnRestore:$DecryptOnRestore | Out-Null
