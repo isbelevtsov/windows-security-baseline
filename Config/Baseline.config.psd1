@@ -1,7 +1,7 @@
 @{
     PasswordPolicy = @{
         MinimumPasswordLength = @{
-            Value       = 14
+            Value       = 10
             Description = "Minimum characters required. HIPAA doesn't mandate a specific number; NIST SP 800-63B recommends 14+ over relying on complexity rules."
         }
         PasswordComplexity = @{
@@ -9,11 +9,11 @@
             Description = "Requires a mix of character classes (upper/lower/digit/symbol) when set."
         }
         PasswordHistorySize = @{
-            Value       = 24
+            Value       = 10
             Description = "Number of previous passwords remembered to prevent reuse."
         }
         MaximumPasswordAgeDays = @{
-            Value       = 90
+            Value       = 365
             Description = "Days before a password must be changed. Set to 0 to disable expiry (NIST 800-63B now discourages forced periodic rotation, but many HIPAA auditors still expect it)."
         }
         MinimumPasswordAgeDays = @{

@@ -164,10 +164,10 @@ by HIPAA itself.
 
 | Module | Key | Default | Description |
 |---|---|---|---|
-| PasswordPolicy | `MinimumPasswordLength` | `14` | Minimum characters required. HIPAA doesn't mandate a specific number; NIST SP 800-63B recommends 14+ over relying on complexity rules. |
+| PasswordPolicy | `MinimumPasswordLength` | `10` | Minimum characters required. HIPAA doesn't mandate a specific number; NIST SP 800-63B recommends 14+ over relying on complexity rules. |
 | PasswordPolicy | `PasswordComplexity` | `$true` | Requires a mix of character classes (upper/lower/digit/symbol) when set. |
-| PasswordPolicy | `PasswordHistorySize` | `24` | Number of previous passwords remembered to prevent reuse. |
-| PasswordPolicy | `MaximumPasswordAgeDays` | `90` | Days before a password must be changed. Set to 0 to disable expiry (NIST 800-63B now discourages forced periodic rotation, but many HIPAA auditors still expect it). |
+| PasswordPolicy | `PasswordHistorySize` | `10` | Number of previous passwords remembered to prevent reuse. |
+| PasswordPolicy | `MaximumPasswordAgeDays` | `365` | Days before a password must be changed. Set to 0 to disable expiry (NIST 800-63B now discourages forced periodic rotation, but many HIPAA auditors still expect it). |
 | PasswordPolicy | `MinimumPasswordAgeDays` | `1` | Minimum days before a password can be changed again, preventing rapid cycling back to an old password. |
 | AccountLockout | `LockoutThreshold` | `5` | Failed logon attempts allowed before the account locks. |
 | AccountLockout | `LockoutDurationMinutes` | `15` | How long a locked account stays locked before auto-unlocking. |
