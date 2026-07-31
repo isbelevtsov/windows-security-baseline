@@ -61,7 +61,7 @@ function New-CompliantTemporaryPassword {
     $digits = '23456789'
     $symbols = '!@#$%^&*-_=+?'
     $all = $upper + $lower + $digits + $symbols
-    $length = 24
+    $length = 12
 
     # RandomNumberGenerator's static Fill() method doesn't exist in .NET
     # Framework (confirmed on real hardware under Windows PowerShell 5.1,

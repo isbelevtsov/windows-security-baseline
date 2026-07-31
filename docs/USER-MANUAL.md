@@ -1,8 +1,12 @@
 # Security Baseline — Step-by-Step User Manual
 
+> **Windows users:** open [`USER-MANUAL.html`](USER-MANUAL.html) instead — double-click it on any Windows PC (opens in Microsoft Edge). It is a single self-contained file with all pictures included.
+
 This guide walks you through installing and running the **Security Baseline** toolkit on a **clean Windows 11 computer**, when the files arrive as a **ZIP archive**.
 
 You do **not** need to be an IT professional. Follow the steps in order. If a step asks you to type something, copy it exactly.
+
+> **About the pictures:** The screenshots below are **generic examples** to show you what to look for. Your Windows theme, colors, and exact wording may look a little different — follow the arrows and the matching text in each step.
 
 ---
 
@@ -57,6 +61,9 @@ Avoid putting it only inside a temporary browser “Downloads” folder if you�
 
 1. Right-click the ZIP file.
 2. Choose **Extract All…** (wording may vary slightly).
+
+![Right-click the ZIP file and choose Extract All](images/01-extract-zip.png)
+
 3. Choose a destination, for example:
    - `C:\Temp\SecurityBaseline`
 4. Click **Extract**.
@@ -64,6 +71,8 @@ Avoid putting it only inside a temporary browser “Downloads” folder if you�
    - `Setup.cmd`
    - `Invoke-SecurityBaseline.ps1`
    - folders named `Config`, `Common`, `Modules`, `Tools`, `docs`
+
+![Extracted folder — keep going until you see Setup.cmd](images/02-folder-setup-cmd.png)
 
 If you only see one nested folder after extract, open that folder until you see `Setup.cmd`. **All later commands must be run from the folder that contains `Setup.cmd`.**
 
@@ -78,7 +87,7 @@ Windows often blocks scripts that arrived from another computer (ZIP downloads a
 ### Step 3. Run Setup
 
 1. Open the extracted folder (the one with `Setup.cmd`).
-2. Double-click **`Setup.cmd`**.
+2. Double-click **`Setup.cmd`** (see the highlighted file in the picture above).
 3. A black window opens and runs three steps:
    - Unblock the script files
    - Allow signed scripts to run for your account
@@ -94,6 +103,8 @@ Windows often blocks scripts that arrived from another computer (ZIP downloads a
    ```
 
    then press **Enter**.
+
+![Setup window — type yes when asked](images/03-setup-type-yes.png)
 
 5. Wait until you see a message that prerequisites are complete (it will mention you can run `Invoke-SecurityBaseline.ps1`).
 6. If the window says **Press any key to continue…**, press a key to close it.
@@ -114,7 +125,12 @@ The main toolkit **must** run with administrator rights. A normal PowerShell win
 2. Type: `PowerShell`
 3. You should see **Windows PowerShell**.
 4. Right-click it → choose **Run as administrator**.
+
+![Search for PowerShell, then Run as administrator](images/04-powershell-run-as-admin.png)
+
 5. If Windows asks **Do you want to allow this app to make changes?**, click **Yes**.
+
+![User Account Control — click Yes](images/08-uac-yes.png)
 
 You should see a blue (or dark) window. The title bar often includes the word **Administrator**.
 
@@ -152,8 +168,11 @@ Type this exactly and press **Enter**:
 .\Invoke-SecurityBaseline.ps1 -Mode Audit
 ```
 
+![Administrator PowerShell — run Audit from the toolkit folder](images/05-powershell-audit.png)
+
 What you should see:
 
+- The word **Administrator** in the window title
 - A table of checks (module, setting, expected vs actual, pass/fail)
 - A short summary at the end (how many passed / failed)
 
@@ -205,6 +224,8 @@ If Apply created a BitLocker recovery key and/or temporary account passwords, a 
 === SAVE THESE NOW - generated secrets ===
 ```
 
+![Yellow SAVE THESE NOW banner — photograph or copy before closing](images/06-save-these-now.png)
+
 **Do this before you close the window:**
 
 1. Photograph the screen **or** copy the values into a password manager / printed note kept in a locked place.
@@ -241,6 +262,9 @@ On many PCs this works automatically during Apply. On **Windows 11 Home**, if th
 2. Open **Settings**.
 3. Go to **Privacy & security** → **Device encryption**.
 4. Turn **Device encryption** **On**.
+
+![Settings → Privacy & security → Device encryption → On](images/07-device-encryption.png)
+
 5. If Windows asks you to sign in with a Microsoft account to “finish” encrypting:
    - You can **dismiss / skip** that sign-in for this toolkit’s purposes.
    - Flipping the toggle alone is what stages the volume.
